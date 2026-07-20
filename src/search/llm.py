@@ -81,6 +81,7 @@ def _call_openai(prompt, model, api_key, max_tokens, logger):
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 1.0,
+            "max_completion_tokens": max_tokens,
         },
         timeout=_TIMEOUT,
     )

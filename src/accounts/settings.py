@@ -196,9 +196,6 @@ class GlobalSettingsManager:
     # LLM-generated search terms + locale
     # ------------------------------------------------------------------
 
-    # Kept in sync with search.llm.DEFAULT_MODELS.
-    _LLM_PROVIDERS = ("openai", "anthropic", "gemini")
-
     def get_llm_config(self):
         """Return the LLM query-generation config from settings."""
         s = self.get_settings()
@@ -220,8 +217,10 @@ class GlobalSettingsManager:
         "auto". The API key is stored as-is (plain text) alongside the other
         settings.
         """
+        from ..search.llm import SUPPORTED_PROVIDERS
+
         provider = str(provider or "openai").strip().lower()
-        if provider not in self._LLM_PROVIDERS:
+        if provider not in SUPPORTED_PROVIDERS:
             provider = "openai"
 
         locale = str(search_locale or "").strip() or "auto"
