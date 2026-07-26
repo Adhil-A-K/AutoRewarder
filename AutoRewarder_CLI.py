@@ -153,18 +153,39 @@ def rotate_ip():
     console_log(f"[IP Rotation] Current IP: {current_ip}")
     console_log(f"[IP Rotation] Triggering rotation via {phone_url}/newip...")
 
-    # Trigger rotation
-    try:
-        resp = requests.get(f"{phone_url}/newip", timeout=10)
-        if not resp.ok:
-            return (False, current_ip, f"Phone API returned {resp.status_code}")
-    except Exception as e:
-        return (False, current_ip, f"Cannot reach phone API: {e}")
+    # Trigger rotation — retry a few times in case the phone is on slow data
+    triggered = False
+    for attempt in range(3):
+        try:
+            resp = requests.get(f"{phone_url}/newip", timeout=15)
+            if resp.ok:
+                triggered = True
+                console_log(f"[IP Rotation] Phone acknowledged: {resp.text[:100]}")
+                break
+        except Exception:
+            pass
+        console_log(f"[IP Rotation] Phone not responding, retry {attempt+1}/3...")
+        time.sleep(5)
 
-    # Poll until phone is ready
-    console_log("[IP Rotation] Waiting for phone to reconnect...")
-    max_wait = 120
+    if not triggered:
+        return (False, current_ip, "Cannot reach phone API after 3 attempts")
+
+    # Wait for phone to cycle through airplane mode.
+    # Realistic timeline:
+    #   0s   — airplane ON (radio disconnects)
+    #   3s   — airplane OFF (radio starts reconnecting)
+    #   8-15s — cellular data establishes
+    #   15-30s — Tailscale reconnects
+    #   20-40s — HTTP server reachable again
+    # Total: 30-60s typical, up to 90s on slow carriers
+    console_log("[IP Rotation] Waiting for phone to reconnect (be patient)...")
+    console_log("[IP Rotation]   Phone needs: airplane cycle + data + Tailscale reconnect")
+    max_wait = 180
     start = time.time()
+
+    # Initial grace period — don't poll during airplane mode
+    console_log("[IP Rotation]   Initial grace period (20s)...")
+    time.sleep(20)
 
     while True:
         elapsed = time.time() - start
@@ -176,7 +197,7 @@ def rotate_ip():
             )
 
         try:
-            resp = requests.get(f"{phone_url}/status", timeout=5)
+            resp = requests.get(f"{phone_url}/status", timeout=10)
             data = resp.json()
             if data.get("ready"):
                 console_log(
@@ -186,17 +207,27 @@ def rotate_ip():
         except Exception:
             pass
 
-        time.sleep(3)
+        time.sleep(8)  # Longer intervals — don't hammer slow mobile data
 
     # Wait for network stabilization
-    time.sleep(5)
+    console_log("[IP Rotation] Waiting for network to stabilize...")
+    time.sleep(8)
 
-    # Verify new IP
-    try:
-        resp = requests.get("https://api.ipify.org", timeout=15)
-        new_ip = resp.text.strip()
-    except Exception as e:
-        return (False, "unknown", f"Cannot get new IP: {e}")
+    # Verify new IP — with retries
+    new_ip = ""
+    for attempt in range(5):
+        try:
+            resp = requests.get("https://api.ipify.org", timeout=20)
+            new_ip = resp.text.strip()
+            if new_ip:
+                break
+        except Exception:
+            pass
+        console_log(f"[IP Rotation] Retry {attempt+1}/5 getting new IP...")
+        time.sleep(5)
+
+    if not new_ip:
+        return (False, "unknown", "Cannot get new IP after 5 attempts")
 
     if new_ip == current_ip and current_ip != "unknown":
         console_log(

@@ -4,6 +4,14 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV DISPLAY=:99
 ENV BRAVE_BINARY=/usr/bin/brave-browser
 
+# Timezone and locale — MUST match the phone's exit node region (India)
+# This is critical: if the browser's JS Date() shows UTC while the IP is
+# Indian, Microsoft can detect the mismatch and flag the account.
+ENV TZ=Asia/Kolkata
+ENV LANG=en_IN.UTF-8
+ENV LC_ALL=en_IN.UTF-8
+ENV LANGUAGE=en_IN:en
+
 # System deps: Brave, Python, Xvfb, VNC, fonts, misc
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Brave browser deps
@@ -14,6 +22,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xvfb x11vnc xauth \
     # Fonts (Brave needs these for rendering)
     fonts-liberation fonts-noto-color-emoji fonts-dejavu-core \
+    # Locale + timezone
+    locales tzdata \
     # X11 libs
     libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
     libxrandr2 libxkbcommon0 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
@@ -22,6 +32,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Process management
     procps \
     && rm -rf /var/lib/apt/lists/*
+# Configure locale and timezone
+RUN sed -i 's/# en_IN.UTF-8/en_IN.UTF-8/' /etc/locale.gen && \
+    locale-gen en_IN.UTF-8 && \
+    ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
+    dpkg-reconfigure -f noninteractive tzdata
 
 # Install Brave Browser (ARM64)
 RUN curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg \

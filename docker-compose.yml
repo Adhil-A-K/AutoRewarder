@@ -52,20 +52,26 @@ services:
       - PHONE_API_IP=${PHONE_TS_IP}
       - PHONE_API_PORT=9090
       - HOME_DIR=/data
+      - TZ=Asia/Kolkata
+      - LANG=en_IN.UTF-8
+      - LC_ALL=en_IN.UTF-8
+      - LANGUAGE=en_IN:en
     # Give it time for Tailscale to connect before starting
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
-        # Wait for Tailscale to be ready
-        echo "Waiting for Tailscale connection..."
-        for i in $$(seq 1 60); do
-          if curl -sf --max-time 2 http://100.100.100.200/latest/meta-data/ > /dev/null 2>&1 || \
-             ip route get 8.8.8.8 > /dev/null 2>&1; then
-            echo "Tailscale is ready!"
+        echo "Waiting for Tailscale to be ready..."
+        # Poll with patience — phone exit node may take time to become
+        # reachable after container starts, especially over mobile data.
+        for i in $$(seq 1 90); do
+          # Check if we can route through the exit node
+          EXTERNAL_IP=$$(curl -sf --max-time 5 https://api.ipify.org 2>/dev/null || echo "")
+          if [ -n "$$EXTERNAL_IP" ]; then
+            echo "  Tailscale exit node active! External IP: $$EXTERNAL_IP"
             break
           fi
-          echo "  waiting... ($$i/60)"
-          sleep 2
+          echo "  waiting for exit node... ($$i/90)"
+          sleep 3
         done
         exec /app/scripts/entrypoint.sh
 

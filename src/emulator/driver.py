@@ -94,6 +94,12 @@ class DriverManager:
         options.add_argument("--no-sandbox")  # Required in Docker
         options.add_argument("--disable-dev-shm-usage")  # Overcome limited /dev/shm
 
+        # Locale & language — must match exit node region (India)
+        # This affects navigator.language, Accept-Language header, and
+        # Date formatting. Critical for avoiding timezone mismatch detection.
+        options.add_argument("--lang=en-IN")
+        options.add_argument("--accept-lang=en-IN,en;q=0.9")
+
         if mobile:
             options.add_argument(f"--user-agent={self.MOBILE_USER_AGENT}")
             window_size = self.MOBILE_WINDOW_SIZE
