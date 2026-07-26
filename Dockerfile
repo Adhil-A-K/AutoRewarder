@@ -40,7 +40,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Configure locale and timezone from build args
 RUN sed -i "s/# ${LOCALE_GEN}/${LOCALE_GEN}/" /etc/locale.gen && \
-    locale-gen ${LOCALE_GEN} && \
+    sed -i 's/# en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && \
+    locale-gen && \
     ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime && \
     dpkg-reconfigure -f noninteractive tzdata
 

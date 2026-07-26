@@ -7,6 +7,8 @@ echo "========================================="
 
 # --- Virtual Display ---
 echo "[1/4] Starting virtual display (Xvfb)..."
+# Clean up stale lock files from previous container runs
+rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
 Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
 sleep 1
 
