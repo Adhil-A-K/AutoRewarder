@@ -1,14 +1,26 @@
-"""Edge WebDriver setup for per-account profiles."""
+"""
+Brave WebDriver setup for per-account profiles.
 
+Migrated from Edge to Brave (Chromium-based) for ARM64 Linux compatibility.
+Brave provides built-in anti-fingerprinting (canvas/WebGL randomization per
+session) which adds an extra layer of safety for bot detection evasion.
+"""
+
+import os
 from selenium import webdriver
-from selenium.webdriver.edge.options import Options
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+
+
+# Brave binary location — can be overridden via environment variable.
+BRAVE_BINARY = os.environ.get("BRAVE_BINARY", "/usr/bin/brave-browser")
 
 
 class DriverManager:
     """
-    Manages the Selenium WebDriver for MS Edge.
+    Manages the Selenium WebDriver for Brave Browser.
 
-    Each DriverManager instance is bound to a specific Edge --user-data-dir
+    Each DriverManager instance is bound to a specific --user-data-dir
     (i.e. one account). Switching account = rebuilding this manager with a
     different profile_path.
     """
@@ -35,19 +47,18 @@ class DriverManager:
 
     def setup_driver(self, headless=None, disable_identity=False, mobile=False):
         """
-        Set up the Selenium WebDriver for MS Edge using this manager's profile.
+        Set up the Selenium WebDriver for Brave Browser using this manager's profile.
 
         Args:
             headless: Headless override. Falls back to self.hide_browser.
-            disable_identity: When True, add Edge/Chromium flags that disable
-                the Windows-account-based auto sign-in. Used during First
-                Setup so a second MSA can actually log in.
-            mobile: When True, launch Edge with an iPhone user agent and a
+            disable_identity: Kept for API compatibility. On Linux/Brave this
+                is a no-op (the flags were Windows Edge-specific).
+            mobile: When True, launch Brave with an iPhone user agent and a
                 mobile-sized viewport so Rewards credits the searches as
                 mobile. When False, use the desktop viewport.
 
         Returns:
-            webdriver.Edge: The configured WebDriver instance.
+            webdriver.Chrome: The configured WebDriver instance.
 
         Raises:
             RuntimeError: If profile_path is None (no account selected).
@@ -62,12 +73,26 @@ class DriverManager:
             headless = self.hide_browser
 
         options = Options()
+
+        # Brave binary
+        options.binary_location = BRAVE_BINARY
+
+        # Per-account isolated profile
         options.add_argument(f"--user-data-dir={self.profile_path}")
         options.add_argument("--profile-directory=Default")
+
+        # Anti-detection flags
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_argument("--no-default-browser-check")
         options.add_argument("--no-first-run")
+        options.add_argument("--disable-infobars")  # "Chrome is being controlled" bar
+        options.add_argument("--disable-extensions")  # avoid extension interference
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        options.add_experimental_option("useAutomationExtension", False)
+
+        # VPS/Docker specific
+        options.add_argument("--no-sandbox")  # Required in Docker
+        options.add_argument("--disable-dev-shm-usage")  # Overcome limited /dev/shm
 
         if mobile:
             options.add_argument(f"--user-agent={self.MOBILE_USER_AGENT}")
@@ -76,21 +101,26 @@ class DriverManager:
             window_size = self.DESKTOP_WINDOW_SIZE
         options.add_argument(f"--window-size={window_size}")
 
-        if disable_identity:
-            # Kill the various Chromium/Edge paths that silently sign the user
-            # in with the Windows-level Microsoft identity.
-            options.add_argument(
-                "--disable-features=msImplicitSignin,AadSsoUrlInterceptionEnabled,"
-                "WebOtpBackendAuto,IdentityConsistency,msIdentityWebSignIn,"
-                "msEdgeIdentitySyncInterception"
-            )
-            options.add_argument("--disable-sync")
+        # disable_identity was Windows Edge-specific; kept as no-op for
+        # backward compatibility with callers.
 
         if headless:
             options.add_argument("--headless=new")
             options.add_argument("--disable-gpu")
 
-        _driver = webdriver.Edge(options=options)
+        _driver = webdriver.Chrome(options=options)
+
+        # Anti-detection: remove webdriver flag from navigator
+        _driver.execute_cdp_cmd(
+            "Page.addScriptToEvaluateOnNewDocument",
+            {
+                "source": """
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined
+                    });
+                """
+            },
+        )
 
         if mobile:
             # Turn the session into a genuine mobile one at the engine level.
@@ -136,9 +166,9 @@ class DriverManager:
 
         return _driver
 
-    def close_running_edge(self):
+    def close_running_browser(self):
         """
-        Close running Edge processes to avoid conflicts with the Selenium profile.
+        Close running Brave processes to avoid conflicts with the Selenium profile.
         Kept as a no-op for backward compatibility; per-account profiles make this
         generally unnecessary.
         """

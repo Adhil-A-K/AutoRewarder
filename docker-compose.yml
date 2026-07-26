@@ -1,0 +1,76 @@
+# AutoRewarder — Docker Compose
+# Two services:
+#   1. ts (Tailscale sidecar) — routes all traffic through phone exit node
+#   2. autorewarder — Brave browser + AutoRewarder automation
+#
+# autorewarder uses network_mode: service:ts, meaning all its network
+# traffic goes through the Tailscale sidecar. The host VPS is unaffected.
+#
+# Usage:
+#   1. Set TS_AUTHKEY in .env
+#   2. Set PHONE_TS_IP in .env (your phone's Tailscale IP)
+#   3. docker compose up -d
+#   4. Connect VNC to <vps-tailscale-ip>:5900 for first-time login
+#   5. After login, run: docker compose exec autorewarder python3 AutoRewarder_CLI.py --headless
+
+services:
+  # --- Tailscale sidecar ---
+  ts:
+    image: tailscale/tailscale:latest
+    container_name: autorewarder-ts
+    hostname: autorewarder
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_EXTRA_ARGS=--exit-node=${PHONE_TS_IP} --exit-node-allow-lan-access --accept-routes
+      - TS_USERSPACE=false
+    # VNC port exposed here because autorewarder shares this network namespace
+    ports:
+      - "5900:5900"  # VNC (for first-time account login)
+
+  # --- AutoRewarder ---
+  autorewarder:
+    build: .
+    container_name: autorewarder
+    restart: unless-stopped
+    network_mode: service:ts  # All traffic goes through Tailscale sidecar
+    depends_on:
+      ts:
+        condition: service_started
+    volumes:
+      - autorewarder-data:/data  # Persistent: browser profiles, history, stats
+    environment:
+      - DISPLAY=:99
+      - PHONE_API_IP=${PHONE_TS_IP}
+      - PHONE_API_PORT=9090
+      - HOME_DIR=/data
+    # Give it time for Tailscale to connect before starting
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        # Wait for Tailscale to be ready
+        echo "Waiting for Tailscale connection..."
+        for i in $$(seq 1 60); do
+          if curl -sf --max-time 2 http://100.100.100.200/latest/meta-data/ > /dev/null 2>&1 || \
+             ip route get 8.8.8.8 > /dev/null 2>&1; then
+            echo "Tailscale is ready!"
+            break
+          fi
+          echo "  waiting... ($$i/60)"
+          sleep 2
+        done
+        exec /app/scripts/entrypoint.sh
+
+volumes:
+  tailscale-state:
+    driver: local
+  autorewarder-data:
+    driver: local

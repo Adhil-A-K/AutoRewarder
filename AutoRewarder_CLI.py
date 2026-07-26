@@ -16,6 +16,9 @@ Usage examples:
 
     # Override PC / Mobile counts on the fly (only with --account):
     python AutoRewarder.py --headless --account Alice --pc 10 --mobile 5
+
+    # Skip IP rotation between accounts (not recommended):
+    python AutoRewarder.py --headless --no-rotate
 """
 
 import argparse
@@ -68,6 +71,145 @@ def console_log(message):
 
 
 # ---------------------------------------------------------------------------
+# Exit Node & IP Rotation Safety
+# ---------------------------------------------------------------------------
+
+
+def verify_exit_node():
+    """
+    Verify that the Tailscale exit node is active and traffic routes through
+    the phone, NOT the VPS's datacenter IP.
+
+    Returns:
+        tuple: (is_safe: bool, external_ip: str, message: str)
+    """
+    import requests
+
+    # Get the VPS's real public IP (from cloud metadata)
+    vps_ip = ""
+    try:
+        resp = requests.get(
+            "http://169.254.169.254/opc/v2/vnics/", timeout=3
+        )
+        if resp.ok:
+            vnics = resp.json()
+            if vnics:
+                vps_ip = vnics[0].get("publicIp", "")
+    except Exception:
+        pass
+
+    # Get external IP through the exit node
+    try:
+        resp = requests.get("https://api.ipify.org", timeout=15)
+        external_ip = resp.text.strip()
+    except Exception as e:
+        return (False, "unknown", f"Cannot determine external IP: {e}")
+
+    if not external_ip:
+        return (False, "unknown", "Empty response from ipify.org")
+
+    if vps_ip and external_ip == vps_ip:
+        return (
+            False,
+            external_ip,
+            f"CRITICAL: External IP ({external_ip}) matches VPS IP! "
+            f"Exit node is NOT working!",
+        )
+
+    return (True, external_ip, f"Exit node active. External IP: {external_ip}")
+
+
+def rotate_ip():
+    """
+    Trigger IP rotation on the phone via the Automate app's HTTP API.
+
+    The phone toggles airplane mode ON then OFF, which forces the carrier
+    to assign a new dynamic IP.
+
+    Returns:
+        tuple: (success: bool, new_ip: str, message: str)
+    """
+    import requests
+
+    phone_ip = os.environ.get("PHONE_API_IP", "")
+    phone_port = os.environ.get("PHONE_API_PORT", "9090")
+
+    if not phone_ip:
+        return (
+            False,
+            "unknown",
+            "PHONE_API_IP not set. Cannot rotate IP.",
+        )
+
+    phone_url = f"http://{phone_ip}:{phone_port}"
+
+    # Get current IP
+    try:
+        resp = requests.get("https://api.ipify.org", timeout=15)
+        current_ip = resp.text.strip()
+    except Exception:
+        current_ip = "unknown"
+
+    console_log(f"[IP Rotation] Current IP: {current_ip}")
+    console_log(f"[IP Rotation] Triggering rotation via {phone_url}/newip...")
+
+    # Trigger rotation
+    try:
+        resp = requests.get(f"{phone_url}/newip", timeout=10)
+        if not resp.ok:
+            return (False, current_ip, f"Phone API returned {resp.status_code}")
+    except Exception as e:
+        return (False, current_ip, f"Cannot reach phone API: {e}")
+
+    # Poll until phone is ready
+    console_log("[IP Rotation] Waiting for phone to reconnect...")
+    max_wait = 120
+    start = time.time()
+
+    while True:
+        elapsed = time.time() - start
+        if elapsed >= max_wait:
+            return (
+                False,
+                current_ip,
+                f"Timeout after {max_wait}s waiting for phone",
+            )
+
+        try:
+            resp = requests.get(f"{phone_url}/status", timeout=5)
+            data = resp.json()
+            if data.get("ready"):
+                console_log(
+                    f"[IP Rotation] Phone back online ({elapsed:.0f}s)"
+                )
+                break
+        except Exception:
+            pass
+
+        time.sleep(3)
+
+    # Wait for network stabilization
+    time.sleep(5)
+
+    # Verify new IP
+    try:
+        resp = requests.get("https://api.ipify.org", timeout=15)
+        new_ip = resp.text.strip()
+    except Exception as e:
+        return (False, "unknown", f"Cannot get new IP: {e}")
+
+    if new_ip == current_ip and current_ip != "unknown":
+        console_log(
+            f"[IP Rotation] WARNING: IP unchanged ({new_ip}). "
+            f"Carrier may have recycled the same IP."
+        )
+    else:
+        console_log(f"[IP Rotation] IP changed: {current_ip} → {new_ip}")
+
+    return (True, new_ip, f"New IP: {new_ip}")
+
+
+# ---------------------------------------------------------------------------
 # Run helpers
 # ---------------------------------------------------------------------------
 
@@ -86,7 +228,6 @@ def _run_once(api, pc, mobile):
         api.main(int(pc), int(mobile))
     except Exception as e:
         console_log(f"[ERROR] Run failed: {e}")
-
 
 def _run_scheduled(api, pc, mobile, duration_hours, queries_per_hour):
     """
@@ -205,7 +346,6 @@ def _create_headless_api():
         api.stats._logger = console_log
 
     return api
-
 
 def _resolve_account(api, token):
     """
@@ -344,12 +484,35 @@ def main():
         action="store_true",
         help="Run even if already triggered today.",
     )
+    parser.add_argument(
+        "--no-rotate",
+        action="store_true",
+        help="Skip IP rotation between accounts (not recommended).",
+    )
+    parser.add_argument(
+        "--no-preflight",
+        action="store_true",
+        help="Skip exit node pre-flight check (dangerous).",
+    )
     args = parser.parse_args()
 
     if args.pc is not None and args.pc < 0:
         parser.error("--pc must be >= 0")
     if args.mobile is not None and args.mobile < 0:
         parser.error("--mobile must be >= 0")
+
+    # --- Pre-flight safety check ---
+    if not args.no_preflight:
+        console_log("Running exit node pre-flight check...")
+        is_safe, ext_ip, msg = verify_exit_node()
+        if not is_safe:
+            console_log(f"[CRITICAL] Pre-flight FAILED: {msg}")
+            console_log("ABORTING — not safe to run automation!")
+            console_log("Use --no-preflight to override (NOT recommended).")
+            sys.exit(1)
+        console_log(f"Pre-flight OK: {msg}")
+    else:
+        console_log("WARNING: Pre-flight check skipped (--no-preflight)")
 
     api = _create_headless_api()
 
@@ -375,11 +538,37 @@ def main():
     # Default: iterate every enabled schedule. api._run_lock ensures only one
     # run executes at a time inside the process.
     ran_any = False
+    accounts_run = 0
+
     for acc in accounts:
+        # --- IP Rotation between accounts ---
+        if accounts_run > 0 and not args.no_rotate:
+            console_log(f"--- Rotating IP before next account ({acc['label']}) ---")
+            success, new_ip, rot_msg = rotate_ip()
+            if not success:
+                console_log(f"[WARNING] IP rotation failed: {rot_msg}")
+                console_log(f"Skipping account '{acc['label']}' for safety.")
+                continue
+
+            # Re-verify exit node after rotation
+            is_safe, ext_ip, verify_msg = verify_exit_node()
+            if not is_safe:
+                console_log(f"[CRITICAL] Exit node check failed after rotation: {verify_msg}")
+                console_log("ABORTING remaining accounts!")
+                break
+
+            console_log(f"Post-rotation check OK: {verify_msg}")
+            # Give the connection a moment to stabilize
+            time.sleep(5)
+
         if _run_account(api, acc, force=args.force):
             ran_any = True
+            accounts_run += 1
+
     if not ran_any:
         console_log("No schedules matched today.")
+
+    console_log(f"Run complete. {accounts_run} account(s) processed.")
 
 
 if __name__ == "__main__":

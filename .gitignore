@@ -12,3 +12,6 @@ build/
 # Virtual environments
 .venv/
 venv/
+
+# Environment secrets
+.env

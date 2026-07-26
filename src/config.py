@@ -3,7 +3,7 @@ Configuration module for AutoRewarder.
 
 This module defines constants and paths used throughout the AutoRewarder application,
 such as version information, repository details, platform-specific directories,
-and helpers to resolve per-account file paths (Edge profile, history, status, meta).
+and helpers to resolve per-account file paths (browser profile, history, status, meta).
 """
 
 import os
@@ -53,7 +53,7 @@ if not os.path.exists(APP_DIR):
 #     accounts.json          (index: [{id, label, created_at}])
 #     accounts/
 #       <account_id>/
-#         EdgeProfile/
+#         BrowserProfile/    (per-account browser profile for Selenium)
 #         history.json
 #         status.json
 #         stats.json         (per-account: points balance + activity counters)
@@ -64,7 +64,7 @@ ACCOUNTS_INDEX_PATH = os.path.join(APP_DIR, "accounts.json")
 JSON_FILE_PATH = os.path.join(ASSETS_DIR, "queries.json")
 
 # Legacy single-account paths (used only for one-shot migration detection).
-LEGACY_EDGE_PROFILE_PATH = os.path.join(APP_DIR, "EdgeProfile")
+LEGACY_EDGE_PROFILE_PATH = os.path.join(APP_DIR, "EdgeProfile")  # Old Windows installs
 LEGACY_HISTORY_FILE_PATH = os.path.join(APP_DIR, "history.json")
 LEGACY_STATUS_FILE_PATH = os.path.join(APP_DIR, "status.json")
 
@@ -81,7 +81,11 @@ def account_dir(account_id):
 
 def edge_profile_path(account_id):
     """Return the Selenium --user-data-dir path for a given account."""
-    return os.path.join(account_dir(account_id), "EdgeProfile")
+    return os.path.join(account_dir(account_id), "BrowserProfile")
+
+
+# Backward-compatible alias used by callers in api.py / accounts/manager.py
+browser_profile_path = edge_profile_path
 
 
 def history_path(account_id):
