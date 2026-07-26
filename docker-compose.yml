@@ -7,11 +7,11 @@
 # traffic goes through the Tailscale sidecar. The host VPS is unaffected.
 #
 # Usage:
-#   1. Set TS_AUTHKEY in .env
-#   2. Set PHONE_TS_IP in .env (your phone's Tailscale IP)
+#   1. Copy .env.example to .env and fill in your values
+#   2. docker compose build
 #   3. docker compose up -d
 #   4. Connect VNC to <vps-tailscale-ip>:5900 for first-time login
-#   5. After login, run: docker compose exec autorewarder python3 AutoRewarder_CLI.py --headless
+#   5. After login: docker compose exec autorewarder python3 AutoRewarder_CLI.py --headless
 
 services:
   # --- Tailscale sidecar ---
@@ -38,7 +38,16 @@ services:
 
   # --- AutoRewarder ---
   autorewarder:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Locale/timezone baked into the image at build time
+        LOCALE_GEN: ${LANG:-en_IN.UTF-8}
+        LOCALE: ${LANG:-en_IN.UTF-8}
+        LANGUAGE_VAL: ${LANGUAGE:-en_IN:en}
+        TZ: ${TZ:-Asia/Kolkata}
+    image: autorewarder:latest
     container_name: autorewarder
     restart: unless-stopped
     network_mode: service:ts  # All traffic goes through Tailscale sidecar
@@ -50,24 +59,24 @@ services:
     environment:
       - DISPLAY=:99
       - PHONE_API_IP=${PHONE_TS_IP}
-      - PHONE_API_PORT=9090
+      - PHONE_API_PORT=${PHONE_API_PORT:-9090}
       - HOME_DIR=/data
-      - TZ=Asia/Kolkata
-      - LANG=en_IN.UTF-8
-      - LC_ALL=en_IN.UTF-8
-      - LANGUAGE=en_IN:en
-    # Give it time for Tailscale to connect before starting
+      - TZ=${TZ:-Asia/Kolkata}
+      - LANG=${LANG:-en_IN.UTF-8}
+      - LC_ALL=${LC_ALL:-en_IN.UTF-8}
+      - LANGUAGE=${LANGUAGE:-en_IN:en}
+      - BROWSER_LANG=${BROWSER_LANG:-en-IN}
+      - BROWSER_ACCEPT_LANG=${BROWSER_ACCEPT_LANG:-en-IN,en;q=0.9}
+    # Wait for Tailscale exit node before starting
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
-        echo "Waiting for Tailscale to be ready..."
-        # Poll with patience — phone exit node may take time to become
-        # reachable after container starts, especially over mobile data.
+        echo "Waiting for Tailscale exit node to become active..."
+        # Be patient — phone exit node may take time over mobile data.
         for i in $$(seq 1 90); do
-          # Check if we can route through the exit node
           EXTERNAL_IP=$$(curl -sf --max-time 5 https://api.ipify.org 2>/dev/null || echo "")
           if [ -n "$$EXTERNAL_IP" ]; then
-            echo "  Tailscale exit node active! External IP: $$EXTERNAL_IP"
+            echo "  Exit node active! External IP: $$EXTERNAL_IP"
             break
           fi
           echo "  waiting for exit node... ($$i/90)"

@@ -4,13 +4,18 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV DISPLAY=:99
 ENV BRAVE_BINARY=/usr/bin/brave-browser
 
-# Timezone and locale — MUST match the phone's exit node region (India)
-# This is critical: if the browser's JS Date() shows UTC while the IP is
-# Indian, Microsoft can detect the mismatch and flag the account.
-ENV TZ=Asia/Kolkata
-ENV LANG=en_IN.UTF-8
-ENV LC_ALL=en_IN.UTF-8
-ENV LANGUAGE=en_IN:en
+# Locale and timezone — configurable via docker-compose build args.
+# These MUST match the region of the phone's exit node IP.
+# If browser Date() shows UTC while IP is Indian, Microsoft flags it.
+ARG LOCALE_GEN=en_IN.UTF-8
+ARG LOCALE=en_IN.UTF-8
+ARG LANGUAGE_VAL=en_IN:en
+ARG TZ=Asia/Kolkata
+
+ENV LANG=${LOCALE}
+ENV LC_ALL=${LOCALE}
+ENV LANGUAGE=${LANGUAGE_VAL}
+ENV TZ=${TZ}
 
 # System deps: Brave, Python, Xvfb, VNC, fonts, misc
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -32,10 +37,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Process management
     procps \
     && rm -rf /var/lib/apt/lists/*
-# Configure locale and timezone
-RUN sed -i 's/# en_IN.UTF-8/en_IN.UTF-8/' /etc/locale.gen && \
-    locale-gen en_IN.UTF-8 && \
-    ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
+
+# Configure locale and timezone from build args
+RUN sed -i "s/# ${LOCALE_GEN}/${LOCALE_GEN}/" /etc/locale.gen && \
+    locale-gen ${LOCALE_GEN} && \
+    ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime && \
     dpkg-reconfigure -f noninteractive tzdata
 
 # Install Brave Browser (ARM64)
@@ -68,7 +74,7 @@ COPY scripts/entrypoint.sh /app/scripts/entrypoint.sh
 COPY scripts/pre_flight.sh /app/scripts/pre_flight.sh
 RUN chmod +x /app/scripts/*.sh
 
-# Data volume mount point (Edge profiles, history, stats)
+# Data volume mount point (browser profiles, history, stats)
 VOLUME ["/data"]
 
 # VNC port (for first-time login)
@@ -76,6 +82,6 @@ EXPOSE 5900
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD pgrep -x Xvfb > /dev/null && pgrep -x brave-browser > /dev/null || exit 1
+    CMD pgrep -x Xvfb > /dev/null || exit 1
 
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]
