@@ -3,6 +3,9 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV DISPLAY=:99
 ENV BRAVE_BINARY=/usr/bin/brave-browser
+# AutoRewarder stores data in $HOME/.local/share/AutoRewarder
+# Setting HOME=/data ensures all account data persists in the Docker volume
+ENV HOME=/data
 
 # Locale and timezone — configurable via docker-compose build args.
 # These MUST match the region of the phone's exit node IP.
@@ -77,6 +80,7 @@ COPY scripts/entrypoint.sh /app/scripts/entrypoint.sh
 COPY scripts/pre_flight.sh /app/scripts/pre_flight.sh
 COPY scripts/setup_account.py /app/scripts/setup_account.py
 COPY scripts/chromedriver /usr/local/bin/chromedriver
+COPY scripts/openbox-menu.xml /etc/xdg/openbox/menu.xml
 RUN chmod +x /app/scripts/*.sh /usr/local/bin/chromedriver
 
 # Data volume mount point (browser profiles, history, stats)
