@@ -55,8 +55,8 @@ RUN curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg \
     && apt-get install -y brave-browser \
     && rm -rf /var/lib/apt/lists/*
 
-# Create venv and install Python deps
-RUN python3 -m venv /opt/venv
+# Create venv and install Python deps (allow system site-packages for GTK/gi)
+RUN python3 -m venv --system-site-packages /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
