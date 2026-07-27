@@ -122,6 +122,7 @@ class DriverManager:
             options.add_argument("--disable-gpu")
             options.add_argument("--disable-software-rasterizer")
             options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--window-position=-32000,-32000")
 
         _driver = webdriver.Chrome(
             service=Service(CHROMEDRIVER_BINARY),

@@ -144,6 +144,14 @@ If you've already done your searches manually (or just want to clean up the dash
 
 ## Understanding the Settings
 
+### Rewards Dashboard
+
+This setting determines which version of the Microsoft Rewards page layout the bot should interact with. You can choose from the following options:
+
+- **Auto (detect):** The bot will automatically identify and use the correct dashboard layout for your account.
+- **Legacy:** Forces the bot to use the older Rewards dashboard layout.
+- **New:** Forces the bot to use the updated, new Rewards dashboard layout.
+
 ### Hide Browser
 
 This toggle controls whether you can see Microsoft Edge while searches are happening.
@@ -154,6 +162,19 @@ This toggle controls whether you can see Microsoft Edge while searches are happe
 **Why would you use hide-browser?**
 - Less distracting if you're working on something else
 - Slightly faster performance since it doesn't have to render the browser window what will save system resources (RAM/CPU)
+
+### AI-generated search terms (LLM)
+
+By default, AutoRewarder draws its searches from a large built-in list of English queries. If you'd prefer searches that look natural in **your own language**, enable **"Generate search terms with AI (LLM)"** in the Settings window and provide your own LLM API key (bring-your-own-key).
+
+- **Provider & model:** Choose OpenAI, Anthropic, or Google Gemini, and optionally a specific model (leave blank to use a sensible default for that provider).
+- **API key:** Paste a key from your chosen provider. It is stored locally in your `settings.json` (plain text) and is only sent to that provider to request queries — no personal data is shared.
+- **Language:** Leave **`auto`** to follow the language of the computer running AutoRewarder (detected automatically), or type a locale such as `fr-FR`, `it-IT`, or `en-US` to force one.
+
+On each run, AutoRewarder asks the provider for a fresh batch of queries in your language. If generation fails for any reason — no key, an invalid key, an exceeded quota, or no internet — it silently falls back to the built-in list, so your run always completes.
+
+> [!NOTE]
+> Using an LLM provider may incur costs on your provider account, depending on their pricing. Query generation uses very few tokens per run.
 
 ### Autostart & Daily Run Time
 When enabled, AutoRewarder uses your operating system's native task scheduler (Windows Task Scheduler or Linux systemd) to launch headless runs in the background.
@@ -259,6 +280,7 @@ C:\Users\[YourUsername]\AppData\Local\AutoRewarder\background_log.txt
 
 ### ❌ Don'ts
 
+- Don't do all your searches in one quick burst. Rushing your searches can trigger the anti-fraud systems.
 - Don't manually interact with the AutoRewarder Edge profile while it is running (you can still use your main profile)
 - Don't use Bing while AutoRewarder is performing searches (it may be detected as unusual activity)
 - Don't force-close the app while a session is running
@@ -267,11 +289,12 @@ C:\Users\[YourUsername]\AppData\Local\AutoRewarder\background_log.txt
 
 ### Recommended Usage
 
-For best results:
-1. Run 30 PC searches and 30 Mobile searches per session
-2. Vary the number of searches each time
-3. Run sessions at different times of the day
-4. Use hide-browser mode if you want to do other work while it runs
+To keep your accounts safe and avoid detection, we highly recommend following one of these methods:
+1. **Use Advanced Scheduling:** Automate your searches to safely space them out.
+2. **Set a Realistic Run Duration:** Give the bot enough time (e.g., several hours) to naturally spread out the queries across the day.
+3. **Manual Alternative:** If you prefer not to use the advanced scheduler, run the bot manually in several short sessions at different times throughout the day, rather than doing everything at once.
+4. **Mix up your searches:** Vary the number of searches each time to mimic natural behavior.
+5. **Use hide-browser mode:** Enable this if you want to do other work while the bot runs in the background.
 
 ---
 
@@ -280,7 +303,7 @@ For best results:
 
 For any issues, check the [Troubleshooting](#troubleshooting) section below.
 
-If your issue isn't listed, please open an issue on GitHub or [contact me](mailto:sinosafarov1919@gmail.com).
+If your issue isn't listed, please open an issue on GitHub.
 
 ---
 
@@ -315,17 +338,12 @@ If your issue isn't listed, please open an issue on GitHub or [contact me](mailt
 
 **Q: Is AutoRewarder safe?**
 
-A: AutoRewarder is safe to use on your computer. It uses a separate browser profile so your personal data is not affected.
-
-**Q: Why does it need Microsoft account authorization?**
-
-A: AutoRewarder uses Edge to perform searches. Selenium WebDriver (the automation tool) requires a real browser to work with Microsoft Rewards.
+A: AutoRewarder is completely free of viruses and malware. The project is fully open-source, so you are welcome to inspect the code yourself. It also isolates its activity in a separate browser profile to protect your personal data.
 
 **Q: Will this ban my Microsoft Rewards account?**
 
 A: Microsoft Rewards' Terms of Service prohibit automation. Use at your own risk.
-But AutoRewarder is designed to mimic human behavior with randomized delays and real search queries to reduce the risk of detection. However, there is always a possibility of account suspension if detected such as searching with Bing while AutoRewarder is running or running multiple sessions at the same time.
-Personaly I have been using it for almost 7 months without any issues.
+AutoRewarder is designed to mimic human behavior with randomized delays and real search queries to reduce the risk of detection. However, there is always a possibility of account suspension if detected such as searching with Bing while AutoRewarder is running or running multiple sessions at the same time.
 
 **Q: How many searches can I do per day?**
 
@@ -345,11 +363,12 @@ A: Closing the window sends AutoRewarder to the system tray so it can keep runni
 
 **Q: Can I run this on Mac or Linux?**
 
-A: Currently, the pre-built installer and standalone executable are only available for Windows. The application can run on Linux, but it requires manual setup from the source code. A portable/executable version for Linux is not available at this time. Mac OS is not supported.
+A: Currently, the pre-built installer and standalone executable are only available for Windows. The application can run on Linux, but it requires manual setup from the source code. macOS is not supported.
 
 ---
 
-**Last Updated**: June 2026
-**Version**: 3.4
+**Last Updated**: July 2026
+
+**Version**: 4.0
 
 Enjoy using AutoRewarder! 🎉

@@ -35,7 +35,7 @@ from .accounts import (
     GlobalSettingsManager,
 )
 from .emulator import DriverManager, HumanBehavior, edge_policy
-from .search import HistoryManager, SearchEngine
+from .search import HistoryManager, SearchEngine, llm, resolve_search_locale
 from .dailytasks import DailySet
 from .stats import (
     StatsManager,
@@ -119,7 +119,13 @@ class AutoRewarderAPI:
         self.stats = None
 
         # Per-run stats accumulators, reset at the start of every main() call.
-        self._session_counts = {"pc": 0, "mobile": 0, "cards": 0}
+        self._session_counts = {
+            "pc": 0,
+            "mobile": 0,
+            "cards": 0,
+            "earn": 0,
+            "quests": 0,
+        }
         self._last_scraped_balance = None
         # Last balance-scrape diagnostic ({value, via, candidates, url, title}),
         # surfaced to the dashboard so a failed read can be debugged in place.
@@ -153,7 +159,11 @@ class AutoRewarderAPI:
             profile = edge_profile_path(current_id)
             self.account_meta = AccountMetaManager(current_id)
             self.history = HistoryManager(history_path(current_id), logger=self.log)
-            self.daily_set = DailySet(status_path(current_id), logger=self.log)
+            self.daily_set = DailySet(
+                status_path(current_id),
+                logger=self.log,
+                dashboard_variant=self.account_meta.get_dashboard_variant(),
+            )
             self.stats = StatsManager(stats_path(current_id), logger=self.log)
             self.driver_manager = DriverManager(
                 profile_path=profile, hide_browser=self.hide_browser
@@ -484,6 +494,56 @@ class AutoRewarderAPI:
             return False
 
     # ------------------------------------------------------------------
+    # Exposed to JS: LLM-generated search terms + locale
+    # ------------------------------------------------------------------
+
+    def get_llm_config(self):
+        """
+        Return the LLM query-generation config plus the effective locale.
+
+        Returns:
+            dict: use_llm_queries, llm_provider, llm_model, llm_api_key,
+            search_locale, detected_locale, effective_locale.
+        """
+        cfg = self.global_settings.get_llm_config()
+        cfg["effective_locale"] = self.global_settings.get_effective_locale()
+        return cfg
+
+    def set_llm_config(
+        self, use_llm_queries, provider, model, api_key, search_locale="auto"
+    ):
+        """
+        Persist the LLM query-generation config from the Settings modal.
+
+        Returns:
+            bool: True on success, False otherwise.
+        """
+        try:
+            self.global_settings.set_llm_config(
+                use_llm_queries, provider, model, api_key, search_locale
+            )
+            state = "ON" if use_llm_queries else "OFF"
+            self.log(f"LLM query generation: {state} ({provider}).")
+            return True
+        except Exception as e:
+            self.log(f"[WARNING] Failed to save LLM config: {e}")
+            return False
+
+    def set_detected_locale(self, locale):
+        """
+        Store the locale the GUI read from navigator.language.
+
+        Returns:
+            bool: True on success, False otherwise.
+        """
+        try:
+            self.global_settings.set_detected_locale(locale)
+            return True
+        except Exception as e:
+            self.log(f"[WARNING] Failed to save detected locale: {e}")
+            return False
+
+    # ------------------------------------------------------------------
     # Exposed to JS: per-account schedule + startup
     # ------------------------------------------------------------------
 
@@ -520,18 +580,48 @@ class AutoRewarderAPI:
         return AccountMetaManager(account_id).get_schedule()
 
     def get_all_schedules(self):
-        """Return [{id, label, first_setup_done, schedule}] for the settings modal."""
+        """Return [{id, label, first_setup_done, schedule, dashboard_variant}] for the settings modal."""
         result = []
         for acc in self.account_manager.list():
+            meta = AccountMetaManager(acc["id"])
             result.append(
                 {
                     "id": acc["id"],
                     "label": acc["label"],
                     "first_setup_done": acc["first_setup_done"],
-                    "schedule": AccountMetaManager(acc["id"]).get_schedule(),
+                    "schedule": meta.get_schedule(),
+                    "dashboard_variant": meta.get_dashboard_variant(),
                 }
             )
         return result
+
+    def get_dashboard_variant(self, account_id):
+        """Return a specific account's Rewards dashboard variant, or None if unknown."""
+        if not account_id or not self.account_manager.exists(account_id):
+            return None
+        return AccountMetaManager(account_id).get_dashboard_variant()
+
+    def set_dashboard_variant(self, account_id, variant):
+        """
+        Persist a specific account's Rewards dashboard variant.
+
+        Args:
+            account_id (str): The account to update.
+            variant (str): One of "auto", "legacy", "new".
+
+        Returns:
+            bool: True if persisted, False if the account or value is invalid.
+        """
+        if not account_id or not self.account_manager.exists(account_id):
+            return False
+        ok = AccountMetaManager(account_id).set_dashboard_variant(variant)
+        if not ok:
+            return False
+        # Keep the live DailySet in sync if we changed the current account, so a
+        # run started right after the toggle uses the new variant.
+        if account_id == self.account_manager.current_id() and self.daily_set:
+            self.daily_set.dashboard_variant = variant
+        return True
 
     def set_schedule(self, account_id, payload):
         """
@@ -1714,6 +1804,8 @@ class AutoRewarderAPI:
                     "pc_searches": stats["lifetime"]["pc_searches"],
                     "mobile_searches": stats["lifetime"]["mobile_searches"],
                     "daily_cards": stats["lifetime"]["daily_cards"],
+                    "earn_cards": stats["lifetime"].get("earn_cards", 0),
+                    "quest_tasks": stats["lifetime"].get("quest_tasks", 0),
                 }
             )
         return result
@@ -1741,31 +1833,46 @@ class AutoRewarderAPI:
         except Exception:
             pass
 
-        try:
-            driver.get("https://rewards.bing.com")
-        except TimeoutException:
-            pass  # scrape whatever managed to render
-        except Exception as e:
-            self._last_balance_debug = {"error": str(e)[:120]}
-            return None
-
-        # Give the SPA a beat to mount before the first read.
-        time.sleep(2.5)
+        # Try the dashboard root first (legacy dashboard + the new dashboard when
+        # migrated accounts are redirected there), then the explicit /dashboard
+        # path used by the new Next.js app in case the root doesn't render it.
+        urls = ["https://rewards.bing.com", "https://rewards.bing.com/dashboard"]
 
         attempts = max(1, attempts)
         self._last_balance_debug = {}
-        for _ in range(attempts):
-            info = scrape_points_balance_debug(driver)
-            self._last_balance_debug = info
-            value = info.get("value")
-            if isinstance(value, int) and value >= 0:
-                # No log here — the caller emits a single user-facing line, so
-                # a scrape+update pair doesn't read as a duplicate.
-                return value
-            time.sleep(1.5)
 
-        # Not found. Details are kept in _last_balance_debug for the dashboard's
-        # on-demand refresh diagnostic; nothing is logged to the activity feed.
+        for url in urls:
+            try:
+                driver.get(url)
+            except TimeoutException:
+                pass  # scrape whatever managed to render
+            except Exception as e:
+                self._last_balance_debug = {"error": str(e)[:120], "url": url}
+                continue
+
+            # Give the SPA a beat to mount before the first read.
+            time.sleep(2.5)
+
+            for _ in range(attempts):
+                info = scrape_points_balance_debug(driver)
+                self._last_balance_debug = info
+                value = info.get("value")
+                if isinstance(value, int) and value >= 0:
+                    # No log here — the caller emits a single user-facing line, so
+                    # a scrape+update pair doesn't read as a duplicate.
+                    return value
+                time.sleep(1.5)
+
+        # Not found on any URL. Surface the diagnostic to the activity feed so a
+        # failure can be debugged from the logs (which page did we land on, what
+        # did the selectors match), then also keep it in _last_balance_debug for
+        # the dashboard's on-demand refresh diagnostic.
+        info = self._last_balance_debug or {}
+        self.log(
+            "[WARNING] Balance not found — "
+            f"url={info.get('url')!r} title={info.get('title')!r} "
+            f"via={info.get('via')!r} candidates={info.get('candidates') or []}"
+        )
         return None
 
     def _refresh_balance_on_launch(self, driver):
@@ -2112,7 +2219,13 @@ class AutoRewarderAPI:
 
         # Reset per-run stats accumulators. _run_phase / _run_daily_only feed
         # these; _record_session_stats() folds them into stats.json at the end.
-        self._session_counts = {"pc": 0, "mobile": 0, "cards": 0}
+        self._session_counts = {
+            "pc": 0,
+            "mobile": 0,
+            "cards": 0,
+            "earn": 0,
+            "quests": 0,
+        }
         self._last_scraped_balance = None
 
         try:
@@ -2201,6 +2314,8 @@ class AutoRewarderAPI:
                 pc_searches=self._session_counts.get("pc", 0),
                 mobile_searches=self._session_counts.get("mobile", 0),
                 daily_cards=self._session_counts.get("cards", 0),
+                earn_cards=self._session_counts.get("earn", 0),
+                quest_tasks=self._session_counts.get("quests", 0),
                 balance=self._last_scraped_balance,
             )
         except Exception as e:
@@ -2263,7 +2378,10 @@ class AutoRewarderAPI:
             )
             # Record cards completed + scrape the balance while we're still on
             # the rewards dashboard, before any Stop check returns early.
-            self._session_counts["cards"] += self.daily_set.last_totals.get("newly", 0)
+            totals = self.daily_set.last_totals
+            self._session_counts["cards"] += totals.get("newly", 0)
+            self._session_counts["earn"] += totals.get("earn", 0)
+            self._session_counts["quests"] += totals.get("quests", 0)
             self._try_scrape_balance()
             if self._stop_event.is_set():
                 self.log("Daily tasks aborted by Stop.")
@@ -2282,6 +2400,76 @@ class AutoRewarderAPI:
             self._driver = None
             time.sleep(0.5)
 
+    def _build_queries(self, count):
+        """
+        Build the list of queries for a phase.
+
+        When LLM generation is enabled and an API key is set, ask the chosen
+        provider for `count` fresh queries in the user's language. Any failure
+        (no key, invalid key, quota, offline, malformed answer) or a shortfall
+        is transparently topped up / replaced with a random sample from the
+        static assets/queries.json, so the daily search target is still met and
+        the run never depends on the network.
+
+        Args:
+            count (int): how many queries to produce.
+
+        Returns:
+            list: up to `count` query strings (empty only if the static file is
+            missing).
+        """
+        if count <= 0:
+            return []
+
+        queries = []
+        cfg = self.global_settings.get_llm_config()
+        if cfg["use_llm_queries"]:
+            if cfg["llm_api_key"]:
+                locale = resolve_search_locale(
+                    self.global_settings.get_settings(), self.log
+                )
+                self.log(
+                    f"Generating {count} queries via LLM "
+                    f"({cfg['llm_provider']}, {locale})…"
+                )
+                queries = llm.generate_queries(
+                    count,
+                    locale,
+                    provider=cfg["llm_provider"],
+                    model=cfg["llm_model"],
+                    api_key=cfg["llm_api_key"],
+                    logger=self.log,
+                )
+                if not queries:
+                    self.log(
+                        "[WARNING] LLM generation failed — "
+                        "falling back to static queries."
+                    )
+            else:
+                self.log(
+                    "[WARNING] LLM enabled but no API key set — "
+                    "using static queries."
+                )
+
+        if len(queries) >= count:
+            return queries[:count]
+
+        # Top up from the static file, skipping any query the LLM already
+        # produced. Request extra headroom so de-dup can't leave us short.
+        static = self.search_engine.load_queries_from_json(
+            JSON_FILE_PATH, num_needed=count + len(queries)
+        )
+        if not queries:
+            return static
+
+        seen = set(queries)
+        extra = [q for q in static if q not in seen][: count - len(queries)]
+        self.log(
+            f"LLM returned {len(queries)}/{count} queries — "
+            f"topped up with {len(extra)} static queries."
+        )
+        return queries + extra
+
     def _run_phase(self, mobile, count, do_daily_set):
         """
         Open a driver for a single phase (PC or Mobile), do `count` searches,
@@ -2297,9 +2485,7 @@ class AutoRewarderAPI:
             f"=== {label} phase — {count} {'queries' if count != 1 else 'query'} ==="
         )
 
-        queries_to_search = self.search_engine.load_queries_from_json(
-            JSON_FILE_PATH, num_needed=count
-        )
+        queries_to_search = self._build_queries(count)
         if not queries_to_search:
             self.log(f"[WARNING] {label}: no queries available. Skipping phase.")
             if self.history is not None:
@@ -2334,9 +2520,10 @@ class AutoRewarderAPI:
                 ran_daily_set = True
                 # Record cards + scrape the balance while still on the rewards
                 # dashboard, before the Stop check can short-circuit.
-                self._session_counts["cards"] += self.daily_set.last_totals.get(
-                    "newly", 0
-                )
+                totals = self.daily_set.last_totals
+                self._session_counts["cards"] += totals.get("newly", 0)
+                self._session_counts["earn"] += totals.get("earn", 0)
+                self._session_counts["quests"] += totals.get("quests", 0)
                 self._try_scrape_balance()
                 if not self._stop_event.is_set():
                     if success:
