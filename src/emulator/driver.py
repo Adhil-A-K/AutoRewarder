@@ -181,6 +181,20 @@ class DriverManager:
             options=connect_options,
         )
 
+        # Run anti-detection immediately on the current page context
+        # (addScriptToEvaluateOnNewDocument only applies to FUTURE navigations)
+        try:
+            _driver.execute_script("""
+                for (var key of Object.keys(document)) {
+                    if (key.indexOf('cdc_') >= 0 || key.indexOf('$cdc_') >= 0) {
+                        delete document[key];
+                    }
+                }
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            """)
+        except Exception:
+            pass  # best-effort on initial context
+
         # Anti-detection: comprehensive stealth injection
         _driver.execute_cdp_cmd(
             "Page.addScriptToEvaluateOnNewDocument",
