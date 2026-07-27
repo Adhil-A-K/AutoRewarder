@@ -70,10 +70,12 @@ COPY gui/ /app/gui/
 COPY AutoRewarder.py /app/
 COPY AutoRewarder_CLI.py /app/
 
-# Copy our custom scripts
+# Copy our custom scripts + chromedriver
 COPY scripts/entrypoint.sh /app/scripts/entrypoint.sh
 COPY scripts/pre_flight.sh /app/scripts/pre_flight.sh
-RUN chmod +x /app/scripts/*.sh
+COPY scripts/setup_account.py /app/scripts/setup_account.py
+COPY scripts/chromedriver /usr/local/bin/chromedriver
+RUN chmod +x /app/scripts/*.sh /usr/local/bin/chromedriver
 
 # Data volume mount point (browser profiles, history, stats)
 VOLUME ["/data"]

@@ -15,6 +15,10 @@ from selenium.webdriver.chrome.service import Service
 # Brave binary location — can be overridden via environment variable.
 BRAVE_BINARY = os.environ.get("BRAVE_BINARY", "/usr/bin/brave-browser")
 
+# ChromeDriver binary — must match Brave's Chromium version.
+# On ARM64, Selenium Manager doesn't work, so we need an explicit path.
+CHROMEDRIVER_BINARY = os.environ.get("CHROMEDRIVER_BINARY", "/usr/local/bin/chromedriver")
+
 
 class DriverManager:
     """
@@ -119,16 +123,34 @@ class DriverManager:
             options.add_argument("--disable-software-rasterizer")
             options.add_argument("--disable-dev-shm-usage")
 
-        _driver = webdriver.Chrome(options=options)
+        _driver = webdriver.Chrome(
+            service=Service(CHROMEDRIVER_BINARY),
+            options=options,
+        )
 
         # Anti-detection: remove webdriver flag from navigator
         _driver.execute_cdp_cmd(
             "Page.addScriptToEvaluateOnNewDocument",
             {
                 "source": """
+                    // Remove webdriver flag
                     Object.defineProperty(navigator, 'webdriver', {
                         get: () => undefined
                     });
+                    
+                    // Fake media devices (speakers, mic, webcam)
+                    // Real browsers always have at least audio devices
+                    const fakeDevices = [
+                        { deviceId: '', groupId: '', kind: 'audioinput', label: '' },
+                        { deviceId: '', groupId: '', kind: 'audiooutput', label: '' },
+                        { deviceId: '', groupId: '', kind: 'videoinput', label: '' },
+                    ];
+                    if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+                        const originalEnumerate = navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices);
+                        navigator.mediaDevices.enumerateDevices = function() {
+                            return Promise.resolve(fakeDevices);
+                        };
+                    }
                 """
             },
         )
