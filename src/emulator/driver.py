@@ -20,6 +20,14 @@ BRAVE_BINARY = os.environ.get("BRAVE_BINARY", "/usr/bin/brave-browser")
 CHROMEDRIVER_BINARY = os.environ.get("CHROMEDRIVER_BINARY", "/usr/local/bin/chromedriver")
 
 
+def _find_free_port():
+    """Find a free TCP port for Chrome DevTools debugging."""
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 class DriverManager:
     """
     Manages the Selenium WebDriver for Brave Browser.
@@ -48,6 +56,15 @@ class DriverManager:
     )
     MOBILE_WINDOW_SIZE = "412,915"
     DESKTOP_WINDOW_SIZE = "1920,1080"
+
+    @staticmethod
+    def _build_brave_args(options, debug_port):
+        """Extract Chrome arguments from Options and add remote debugging."""
+        args = []
+        for arg in options.arguments:
+            args.append(arg)
+        args.append(f"--remote-debugging-port={debug_port}")
+        return args
 
     def setup_driver(self, headless=None, disable_identity=False, mobile=False):
         """
@@ -124,9 +141,44 @@ class DriverManager:
             options.add_argument("--disable-dev-shm-usage")
             options.add_argument("--window-position=-32000,-32000")
 
+        # On ARM64 Linux, chromedriver can't launch Brave directly (version
+        # mismatch / sandbox issues). We launch Brave ourselves with
+        # --remote-debugging-port, then connect Selenium via debuggerAddress.
+        import subprocess
+        import socket
+        import time as _time
+
+        debug_port = _find_free_port()
+        launch_args = [BRAVE_BINARY] + self._build_brave_args(options, debug_port)
+
+        _proc = subprocess.Popen(
+            launch_args,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env={**os.environ, "DISPLAY": os.environ.get("DISPLAY", ":99")},
+        )
+
+        # Wait for Brave's debug port to become available
+        for _attempt in range(30):
+            try:
+                with socket.create_connection(("127.0.0.1", debug_port), timeout=1):
+                    break
+            except OSError:
+                _time.sleep(0.5)
+        else:
+            raise RuntimeError(
+                f"Brave did not open debug port {debug_port} within 15s"
+            )
+
+        # Connect Selenium to the running Brave instance
+        connect_options = Options()
+        connect_options.binary_location = BRAVE_BINARY
+        connect_options.add_experimental_option(
+            "debuggerAddress", f"127.0.0.1:{debug_port}"
+        )
         _driver = webdriver.Chrome(
             service=Service(CHROMEDRIVER_BINARY),
-            options=options,
+            options=connect_options,
         )
 
         # Anti-detection: remove webdriver flag from navigator
