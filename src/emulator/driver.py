@@ -181,28 +181,74 @@ class DriverManager:
             options=connect_options,
         )
 
-        # Anti-detection: remove webdriver flag from navigator
+        # Anti-detection: comprehensive stealth injection
         _driver.execute_cdp_cmd(
             "Page.addScriptToEvaluateOnNewDocument",
             {
                 "source": """
-                    // Remove webdriver flag
+                    // 1. Remove webdriver flag
                     Object.defineProperty(navigator, 'webdriver', {
                         get: () => undefined
                     });
                     
-                    // Fake media devices (speakers, mic, webcam)
-                    // Real browsers always have at least audio devices
+                    // 2. Remove CDP (ChromeDriver Protocol) detection markers
+                    // ChromeDriver injects properties starting with 'cdc_' onto document.
+                    // Websites check for these to detect automation.
+                    for (let key of Object.keys(document)) {
+                        if (key.startsWith('cdc_') || key.startsWith('$cdc_') || key.startsWith('__cdc_')) {
+                            delete document[key];
+                        }
+                    }
+                    // Prevent re-injection by making cdc_ properties non-configurable stubs
+                    const cdpHandler = {
+                        get: function(target, prop) {
+                            if (typeof prop === 'string' && (prop.startsWith('cdc_') || prop.startsWith('$cdc_'))) {
+                                return undefined;
+                            }
+                            return Reflect.get(target, prop);
+                        }
+                    };
+                    
+                    // 3. Fake media devices (speakers, mic, webcam)
+                    // Real browsers always have at least audio devices.
+                    // Server/headless environments report 0 which is suspicious.
                     const fakeDevices = [
                         { deviceId: '', groupId: '', kind: 'audioinput', label: '' },
                         { deviceId: '', groupId: '', kind: 'audiooutput', label: '' },
                         { deviceId: '', groupId: '', kind: 'videoinput', label: '' },
                     ];
                     if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
-                        const originalEnumerate = navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices);
                         navigator.mediaDevices.enumerateDevices = function() {
                             return Promise.resolve(fakeDevices);
                         };
+                    }
+                    
+                    // 4. Fake permissions query for media devices
+                    // When a site checks if microphone/camera permission is granted,
+                    // a headless browser returns 'denied' which is suspicious.
+                    if (navigator.permissions && navigator.permissions.query) {
+                        const originalQuery = navigator.permissions.query.bind(navigator.permissions);
+                        navigator.permissions.query = function(params) {
+                            if (params.name === 'microphone' || params.name === 'camera') {
+                                return Promise.resolve({ state: 'prompt', onchange: null });
+                            }
+                            return originalQuery(params);
+                        };
+                    }
+                    
+                    // 5. Ensure plugins array is not empty (headless has 0 plugins)
+                    if (navigator.plugins.length === 0) {
+                        Object.defineProperty(navigator, 'plugins', {
+                            get: () => {
+                                const plugins = [
+                                    { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                                    { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+                                    { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+                                ];
+                                plugins.length = 3;
+                                return plugins;
+                            }
+                        });
                     }
                 """
             },
