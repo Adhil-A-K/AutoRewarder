@@ -29,6 +29,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-liberation fonts-noto-color-emoji fonts-dejavu-core \
     # Locale + timezone
     locales tzdata \
+    # GTK + WebKit for pywebview (GUI mode)
+    python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1 \
     # X11 libs
     libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
     libxrandr2 libxkbcommon0 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
