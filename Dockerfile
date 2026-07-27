@@ -23,8 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl wget gnupg2 ca-certificates \
     # Python
     python3 python3-pip python3-venv \
-    # Virtual display + VNC
-    xvfb x11vnc xauth \
+    # Virtual display + VNC + window manager
+    xvfb x11vnc xauth openbox dbus-x11 xterm \
     # Fonts (Brave needs these for rendering)
     fonts-liberation fonts-noto-color-emoji fonts-dejavu-core \
     # Locale + timezone

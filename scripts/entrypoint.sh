@@ -19,6 +19,16 @@ if ! pgrep -x Xvfb > /dev/null; then
 fi
 echo "  Xvfb running on :99"
 
+# --- Window Manager ---
+echo "[1.5/4] Starting window manager (openbox)..."
+# Start openbox with its own dbus session (persists across docker exec)
+export DISPLAY=:99
+dbus-launch --sh-syntax --exit-with-session openbox &
+sleep 1
+# Set a dark gray background (not pure black)
+xsetroot -solid "#2d2d2d" 2>/dev/null || true
+echo "  Openbox running"
+
 # --- VNC Server ---
 echo "[2/4] Starting VNC server..."
 x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -bg -o /tmp/x11vnc.log

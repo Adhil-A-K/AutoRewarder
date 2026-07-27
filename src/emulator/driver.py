@@ -116,6 +116,8 @@ class DriverManager:
         if headless:
             options.add_argument("--headless=new")
             options.add_argument("--disable-gpu")
+            options.add_argument("--disable-software-rasterizer")
+            options.add_argument("--disable-dev-shm-usage")
 
         _driver = webdriver.Chrome(options=options)
 
