@@ -151,6 +151,15 @@ class DriverManager:
         debug_port = _find_free_port()
         launch_args = [BRAVE_BINARY] + self._build_brave_args(options, debug_port)
 
+        # Clean up stale profile locks from crashed/hung sessions
+        if self.profile_path:
+            for lock_name in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+                lock_path = os.path.join(self.profile_path, lock_name)
+                try:
+                    os.remove(lock_path)
+                except FileNotFoundError:
+                    pass
+
         _proc = subprocess.Popen(
             launch_args,
             stdout=subprocess.DEVNULL,
