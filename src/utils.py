@@ -30,7 +30,7 @@ def humanize_queries(queries):
     Returns:
         humanized_queries (list): Modified query strings with simulated typing errors.
     """
-    import nlpaug.augmenter.char as nac
+    import nlpaug.augmenter.char as nac  # type: ignore
 
     mod = nac.KeyboardAug(
         # 100% probability because the 20% overall chance
@@ -50,7 +50,7 @@ def humanize_queries(queries):
     humanized_queries = []
 
     for query in queries:
-        if random.random() < 1.0:
+        if random.random() < 0.2:
             modified_query = mod.augment(query)
             typo_query = (
                 modified_query[0]
