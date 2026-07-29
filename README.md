@@ -51,7 +51,7 @@ Clone this repo, create virtual environment, and run `python AutoRewarder.py`.
 
 | Perform Searches | App Demo |
 | :---: | :---: |
-|<img src="assets/screenshots/perform_demo.gif">|<img src="assets/screenshots/app_demo_v4.0.gif">|
+|<img src="assets/screenshots/perform_demo.gif">|<img src="assets/screenshots/app_demo_v4.1.gif">|
 
 | Daily Sets (New Dashboard) & Claim action | Tab Switching |
 | :---: | :---: |
@@ -72,8 +72,8 @@ Clone this repo, create virtual environment, and run `python AutoRewarder.py`.
 
 | Main Window & Account Management | Settings |
 | :---: | :---: |
-| <img src="assets/screenshots/main_window_v4.0.jpg"> | <img src="assets/screenshots/settings_1_v4.0.jpg"> |
-| <img src="assets/screenshots/account_management_v4.0.jpg"> | <img src="assets/screenshots/settings_2_v4.0.jpg"> |
+| <img src="assets/screenshots/main_window_v4.0.jpg"> | <img src="assets/screenshots/settings_1_v4.1.jpg"> |
+| <img src="assets/screenshots/account_management_v4.0.jpg"> | <img src="assets/screenshots/settings_2_v4.1.jpg"> |
 
 | History | Statistics Dashboard |
 | :---: | :---: |
