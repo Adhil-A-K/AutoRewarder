@@ -41,7 +41,7 @@ def humanize_queries(queries):
         aug_char_max=1,
         aug_word_max=1,
         # Ignore short words
-        min_char=3,
+        min_char=4,
         include_upper_case=False,
         include_special_char=False,
         include_numeric=True,
@@ -50,14 +50,14 @@ def humanize_queries(queries):
     humanized_queries = []
 
     for query in queries:
-        if random.random() < 0.2:
+        if random.random() < 1.0:
             modified_query = mod.augment(query)
             typo_query = (
                 modified_query[0]
                 if isinstance(modified_query, list)
                 else modified_query
             )
-            humanized_queries.append(typo_query + " (typo)")
+            humanized_queries.append(typo_query)
         else:
             humanized_queries.append(query)
 
