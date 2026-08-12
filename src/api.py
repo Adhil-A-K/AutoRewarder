@@ -397,6 +397,10 @@ class AutoRewarderAPI:
                 self._refresh_balance_on_launch(warmup_driver)
             finally:
                 warmup_driver.quit()
+                # quit() only disconnects CDP (debuggerAddress attach) —
+                # hard-kill the process tree so the browser actually dies.
+                if self.driver_manager is not None:
+                    self.driver_manager.terminate_browser()
         except Exception as e:
             self.log(f"[ERROR] Error loading WebDriver: {e}")
         finally:
@@ -569,6 +573,12 @@ class AutoRewarderAPI:
         try:
             if self._driver is not None:
                 self._driver.quit()
+        except Exception:
+            pass
+        # quit() only disconnects CDP — hard-kill the browser tree.
+        try:
+            if self.driver_manager is not None:
+                self.driver_manager.terminate_browser()
         except Exception:
             pass
         return True
@@ -1706,6 +1716,10 @@ class AutoRewarderAPI:
                 setup_driver.quit()
             except Exception:
                 pass
+            # quit() only disconnects CDP — hard-kill the browser tree so a
+            # first-setup session can't leak either.
+            if self.driver_manager is not None:
+                self.driver_manager.terminate_browser()
 
             # Always restore the Edge policy to its previous state.
             if policy_applied:
@@ -2397,6 +2411,10 @@ class AutoRewarderAPI:
                 self._driver.quit()
             except Exception as e:
                 self.log(f"[WARNING] Error closing driver: {e}")
+            # quit() only disconnects CDP (debuggerAddress attach) — hard-kill
+            # the browser process tree so it actually dies, not leaks.
+            if self.driver_manager is not None:
+                self.driver_manager.terminate_browser()
             self._driver = None
             time.sleep(0.5)
 
@@ -2545,5 +2563,9 @@ class AutoRewarderAPI:
                 self._driver.quit()
             except Exception as e:
                 self.log(f"[WARNING] Error closing driver: {e}")
+            # quit() only disconnects CDP (debuggerAddress attach) — hard-kill
+            # the browser process tree so it actually dies, not leaks.
+            if self.driver_manager is not None:
+                self.driver_manager.terminate_browser()
             self._driver = None
             time.sleep(0.5)

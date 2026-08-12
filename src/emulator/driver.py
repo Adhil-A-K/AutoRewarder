@@ -50,6 +50,8 @@ class DriverManager:
         # Handle of the Brave process launched by setup_driver. Stored so a
         # future close path can terminate it directly if Selenium quit fails.
         self._proc = None
+        # Process group id of the launched browser tree (see terminate_browser).
+        self._proc_pgid = None
 
     # Realistic iPhone UA so Microsoft Rewards credits the searches as mobile.
     MOBILE_USER_AGENT = (
@@ -178,8 +180,15 @@ class DriverManager:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             env={**os.environ, "DISPLAY": os.environ.get("DISPLAY", ":99")},
+            # New session = new process group. /usr/bin/brave-browser is a
+            # bash wrapper, so the real browser is a CHILD of the wrapper;
+            # killing the wrapper alone would orphan the browser. With its
+            # own process group we can killpg the whole tree (wrapper +
+            # brave + renderers) in terminate_browser().
+            start_new_session=True,
         )
         self._proc = _proc
+        self._proc_pgid = _proc.pid
 
         # Wait for Brave's debug port to become available
         for _attempt in range(30):
@@ -335,6 +344,47 @@ class DriverManager:
 
         return _driver
 
+    def terminate_browser(self):
+        """
+        Hard-terminate the browser process tree launched by the last
+        setup_driver call, including the bash wrapper AND the real Brave
+        binary plus all renderers (killpg on the process group).
+
+        Why this exists: Selenium connects via debuggerAddress, so
+        driver.quit() only disconnects the CDP client — it does NOT kill
+        the browser process. Every run that relied on quit() alone leaked
+        its browser (this caused the 279-proc / ~6GB accumulation). This
+        method is the actual cleanup; call it after driver.quit() in
+        finally blocks. Safe to call when nothing is running (no-op).
+        """
+        import signal
+        import time as _time
+
+        pgid = getattr(self, "_proc_pgid", None)
+        self._proc = None
+        self._proc_pgid = None
+        if not pgid:
+            return
+
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except ProcessLookupError:
+            return  # already gone
+        except PermissionError:
+            return
+        except OSError:
+            return
+
+        # Give the browser a moment to flush profile state, then SIGKILL
+        # anything still alive in the group.
+        _time.sleep(3)
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except OSError:
+            pass
+
     def close_running_browser(self):
         """
         Kill orphaned Brave/chromedriver processes left over from prior runs.
@@ -415,8 +465,12 @@ class DriverManager:
                 cur = ppid_map[cur]
                 if cur in python_pids:
                     return False  # owned by a live run / GUI / login window
-                if cur == 1:
-                    return True  # chain dead-ended at container init
+                if cur == 1 or cur not in ppid_map:
+                    # Chain dead-ended: either container init (PID 1) or the
+                    # namespace boundary — docker top reports the init's
+                    # host-side parent, which is invisible inside the
+                    # container, so `cur not in ppid_map` is the boundary.
+                    return True
             return False
 
         to_kill = [pid for pid in candidates if _is_orphan(pid)]
