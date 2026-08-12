@@ -47,6 +47,9 @@ class DriverManager:
         """
         self.profile_path = profile_path
         self.hide_browser = hide_browser
+        # Handle of the Brave process launched by setup_driver. Stored so a
+        # future close path can terminate it directly if Selenium quit fails.
+        self._proc = None
 
     # Realistic iPhone UA so Microsoft Rewards credits the searches as mobile.
     MOBILE_USER_AGENT = (
@@ -151,7 +154,17 @@ class DriverManager:
         debug_port = _find_free_port()
         launch_args = [BRAVE_BINARY] + self._build_brave_args(options, debug_port)
 
-        # Clean up stale profile locks from crashed/hung sessions
+        # Sweep orphaned Brave processes from dead runs BEFORE launching.
+        # This is the single chokepoint every browser launch flows through
+        # (GUI warmup, first-setup login, PC/mobile runs), so even a run
+        # that died abnormally can never leak more than one generation of
+        # browsers. Only orphans are killed — never a live browser owned by
+        # a running process — so anti-detection is completely unaffected.
+        self.close_running_browser()
+
+        # Clean up stale profile locks AFTER the sweep (an orphan killed
+        # here could otherwise recreate its SingletonLock after we removed
+        # it). Locks from crashed/hung sessions would block the new launch.
         if self.profile_path:
             for lock_name in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
                 lock_path = os.path.join(self.profile_path, lock_name)
@@ -166,6 +179,7 @@ class DriverManager:
             stderr=subprocess.DEVNULL,
             env={**os.environ, "DISPLAY": os.environ.get("DISPLAY", ":99")},
         )
+        self._proc = _proc
 
         # Wait for Brave's debug port to become available
         for _attempt in range(30):
@@ -323,8 +337,107 @@ class DriverManager:
 
     def close_running_browser(self):
         """
-        Close running Brave processes to avoid conflicts with the Selenium profile.
-        Kept as a no-op for backward compatibility; per-account profiles make this
-        generally unnecessary.
+        Kill orphaned Brave/chromedriver processes left over from prior runs.
+
+        When a run dies abnormally (VNC session killed, GUI closed, exception
+        before driver.quit()), the Brave process it spawned is orphaned and
+        keeps running — PID 1 can only reap zombies, it cannot kill live
+        orphans. Without this, every dead run leaks one or more headless
+        Brave instances (12 days of manual runs accumulated 250+ procs /
+        ~6GB in the container).
+
+        Safety model — anti-detection untouched, nothing leaves this host:
+          * Only processes whose --user-data-dir matches THIS account's
+            profile are considered, so other accounts / real browsers are
+            never touched.
+          * Only ORPHANS are killed: a process whose parent is gone or whose
+            PPID chain leads to PID 1 (the container init). A browser owned
+            by a live process — an active run, the visible first-setup
+            login window — is never touched.
+          * SIGTERM first (graceful, lets Brave flush profile state), then
+            SIGKILL only if it survives the grace period.
         """
-        return
+        import signal
+        import time as _time
+
+        profile = self.profile_path
+        if not profile:
+            return
+
+        # Find candidate PIDs: Brave/chromedriver bound to our profile dir,
+        # and build the PPID map in the same single pass. We match the
+        # profile path with a literal substring check (not pgrep regex) so
+        # paths containing regex metacharacters can never misfire, and we
+        # never touch anything outside this account.
+        import subprocess
+
+        try:
+            ps_out = subprocess.run(
+                ["ps", "-eo", "pid=,ppid=,args="],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            ).stdout
+        except Exception:
+            return  # ps unavailable or failed — never block a launch
+
+        ppid_map = {}
+        python_pids = set()
+        candidates = []
+        for line in ps_out.splitlines():
+            cols = line.strip().split(None, 2)
+            if len(cols) < 3:
+                continue
+            try:
+                pid = int(cols[0])
+                ppid = int(cols[1])
+            except ValueError:
+                continue
+            cmd = cols[2]
+            ppid_map[pid] = ppid
+            if "python" in cmd:
+                python_pids.add(pid)
+            if profile in cmd and ("brave" in cmd or "chromedriver" in cmd):
+                candidates.append(pid)
+
+        if not candidates:
+            return
+
+        # Decide orphan status by walking the PPID chain up to PID 1.
+        # If every ancestor above us is also dead (PPID 1 at the top), it's
+        # an orphan from a dead run. If any live python process owns it, the
+        # browser is in active use and we leave it alone.
+        def _is_orphan(pid):
+            seen = set()
+            cur = pid
+            while cur in ppid_map and cur not in seen:
+                seen.add(cur)
+                cur = ppid_map[cur]
+                if cur in python_pids:
+                    return False  # owned by a live run / GUI / login window
+                if cur == 1:
+                    return True  # chain dead-ended at container init
+            return False
+
+        to_kill = [pid for pid in candidates if _is_orphan(pid)]
+        if not to_kill:
+            return
+
+        _log = getattr(self, "log", None)
+        if callable(_log):
+            _log(f"Killing {len(to_kill)} orphaned Brave process(es) from previous runs")
+
+        # SIGTERM → grace → SIGKILL
+        for sig, grace in ((signal.SIGTERM, 3), (signal.SIGKILL, 0)):
+            remaining = []
+            for pid in to_kill:
+                try:
+                    os.kill(pid, sig)
+                    remaining.append(pid)
+                except ProcessLookupError:
+                    pass  # already gone
+                except PermissionError:
+                    pass
+            if sig == signal.SIGTERM and remaining:
+                _time.sleep(grace)
+            to_kill = remaining

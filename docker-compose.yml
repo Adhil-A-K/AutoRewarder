@@ -50,6 +50,10 @@ services:
     image: autorewarder:latest
     container_name: autorewarder
     restart: unless-stopped
+    # init: true — tini as PID 1. Without it, bash is PID 1 and orphaned
+    # Brave processes from ended runs are never reaped → 12-day accumulation
+    # of 250+ headless browsers (~6GB). Tini reaps them immediately.
+    init: true
     network_mode: service:ts  # All traffic goes through Tailscale sidecar
     depends_on:
       ts:
