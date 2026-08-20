@@ -289,3 +289,55 @@ class SearchEngine:
                 self._add_to_history(query, f"[ERROR] Unknown Error: {str(e)[:50]}")
 
         return successful
+
+    def perform_visual_search(self, driver, image_path):
+        """
+        ...
+        """
+        raise NotImplementedError("Visual search is not implemented yet.")
+
+    def _get_next_image_id(self, used_images_list):
+        """
+        Selects the next available image ID that hasn't been used recently.
+        If all images have been used, resets the cycle.
+
+        Args:
+            used_images_list (list): A list of image IDs that have been used recently.
+
+        Returns:
+            tuple: A tuple with the selected image ID and the updated list of used images.
+        """
+        all_images = set(range(1, 31))
+        used_images = set(used_images_list)
+
+        available_images = list(all_images - used_images)
+
+        if not available_images:
+            self._log("[INFO] All images have been used. Resetting the cycle.")
+            available_images = list(all_images)
+            used_images_list = []
+
+        selected_image = random.choice(available_images)
+        used_images_list.append(selected_image)
+
+        return selected_image, used_images_list
+
+    def _prepare_unique_image(self):
+        """
+        ...
+        """
+        raise NotImplementedError("_prepare_unique_image is not implemented yet.")
+
+    def should_perform_visual_search(self):
+        """
+        ...
+        """
+        raise NotImplementedError(
+            "should_perform_visual_search is not implemented yet."
+        )
+
+    def mark_as_completed(self):
+        """
+        ...
+        """
+        raise NotImplementedError("mark_as_completed is not implemented yet.")
