@@ -98,7 +98,7 @@ class DailySet:
         if self.logger:
             self.logger(message)
 
-    # -- Status persistence ----------------------------------------------------
+    # -- Status persistence (daily set) ----------------------------------------------------
 
     def should_perform_daily_set(self):
         """
@@ -140,6 +140,55 @@ class DailySet:
         temp_file = self.status_file + ".tmp"
         with open(temp_file, "w", encoding="utf-8") as file:
             json.dump(data, file)
+        os.replace(temp_file, self.status_file)
+
+    # -- Status persistence (visual search) --------------------------------------------------
+
+    def should_perform_visual_search(self):
+        """
+        Check if the visual search task has already been completed today.
+
+        Returns:
+            bool: True if the visual search should be performed, False if it has
+                  already been completed today.
+        """
+        today = str(date.today())
+
+        if not os.path.exists(self.status_file):
+            return True
+
+        try:
+            with open(self.status_file, "r", encoding="utf-8") as file:
+                data = json.load(file)
+
+                return data.get("last_visual_search_date") != today
+
+        except Exception:
+            self._log(f"[ERROR] Failed to read status file: {self.status_file}")
+            return True
+
+    def mark_visual_search_as_completed(self):
+        """Mark the visual search as completed for today."""
+        today = str(date.today())
+
+        data = {}
+
+        if os.path.exists(self.status_file):
+            try:
+                with open(self.status_file, "r", encoding="utf-8") as file:
+                    data = json.load(file)
+            except Exception:
+                self._log(f"[ERROR] Failed to read status file: {self.status_file}")
+
+        data["last_visual_search_date"] = today
+
+        os.makedirs(os.path.dirname(self.status_file), exist_ok=True)
+
+        temp_file = self.status_file + ".tmp"
+
+        with open(temp_file, "w", encoding="utf-8") as file:
+            json.dump(data, file)
+
         os.replace(temp_file, self.status_file)
 
     # -- Section processing ----------------------------------------------------
