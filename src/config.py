@@ -37,6 +37,7 @@ else:
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GUI_DIR = os.path.join(BASE_DIR, "gui")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
+VISUAL_SEARCH_ASSETS_DIR = os.path.join(ASSETS_DIR, "visual_search_assets")
 
 # Portable config takes precedence
 if getattr(sys, "frozen", False):

@@ -322,22 +322,50 @@ class SearchEngine:
 
         return selected_image, used_images_list
 
-    def _prepare_unique_image(self):
+    def _prepare_unique_image(self, image_id):
         """
-        ...
-        """
-        raise NotImplementedError("_prepare_unique_image is not implemented yet.")
+        Prepares a unique version of the image to bypass hash-based detection.
+        Crops 1-5 pixels and randomizes JPEG compression quality.
 
-    def should_perform_visual_search(self):
+        Args:
+            image_id (int): The ID of the image to prepare.
+
+        Returns:
+            str: The path to the prepared image, or None if preparation failed.
         """
-        ...
-        """
-        raise NotImplementedError(
-            "should_perform_visual_search is not implemented yet."
+        import os
+        import tempfile
+        from PIL import Image
+
+        from ..config import VISUAL_SEARCH_ASSETS_DIR
+
+        original_path = os.path.join(
+            VISUAL_SEARCH_ASSETS_DIR,
+            f"{image_id}.jpg",
         )
 
-    def mark_as_completed(self):
-        """
-        ...
-        """
-        raise NotImplementedError("mark_as_completed is not implemented yet.")
+        temp_path = os.path.join(
+            tempfile.gettempdir(),
+            f"AutoRewarder_visual_search_{image_id}_{random.randint(1000, 9999)}.jpg",
+        )
+
+        if not os.path.exists(original_path):
+            self._log(f"[ERROR] Source image not found: {original_path}")
+            return None
+
+        try:
+            with Image.open(original_path) as img:
+                width, height = img.size
+
+                crop_x = random.randint(1, 5)
+                crop_y = random.randint(1, 5)
+                cropped_img = img.crop((0, 0, width - crop_x, height - crop_y))
+
+                random_quality = random.randint(70, 95)
+                cropped_img.save(temp_path, "JPEG", quality=random_quality)
+
+            return temp_path
+
+        except Exception as e:
+            self._log(f"[ERROR] Failed to process image {image_id}: {e}")
+            return None
