@@ -357,11 +357,18 @@ class SearchEngine:
             with Image.open(original_path) as img:
                 width, height = img.size
 
-                crop_x = random.randint(1, 5)
-                crop_y = random.randint(1, 5)
-                cropped_img = img.crop((0, 0, width - crop_x, height - crop_y))
+                # 54 684 unique variations
+                crop_left = random.randint(0, 5)
+                crop_top = random.randint(0, 5)
+                crop_right = random.randint(1, 7)
+                crop_bottom = random.randint(1, 7)
 
-                random_quality = random.randint(70, 95)
+                cropped_img = img.crop(
+                    (crop_left, crop_top, width - crop_right, height - crop_bottom)
+                )
+
+                random_quality = random.randint(65, 95)
+
                 cropped_img.save(temp_path, "JPEG", quality=random_quality)
 
             return temp_path
