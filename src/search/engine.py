@@ -337,7 +337,7 @@ class SearchEngine:
             self._log(f"[ERROR] Visual search failed: {e}")
             return False
 
-    def _get_next_image_id(self, used_images_list):
+    def get_next_image_id(self, used_images_list):
         """
         Selects the next available image ID that hasn't been used recently.
         If all images have been used, resets the cycle.
@@ -363,7 +363,7 @@ class SearchEngine:
 
         return selected_image, used_images_list
 
-    def _prepare_unique_image(self, image_id):
+    def prepare_unique_image(self, image_id):
         """
         Prepares a unique version of the image to bypass hash-based detection.
         Crops 1-5 pixels and randomizes JPEG compression quality.

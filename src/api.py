@@ -2368,7 +2368,7 @@ class AutoRewarderAPI:
                 "but running anyway since you asked explicitly."
             )
 
-        self.log("=== Daily tasks only — no searches ===")
+        self.log("=== Daily tasks and Visual Search only ===")
 
         self._driver = self.driver_manager.setup_driver(mobile=False)
         try:
@@ -2391,6 +2391,10 @@ class AutoRewarderAPI:
                 self.log("Daily tasks completed and marked as done for today.")
             else:
                 self.log("Daily tasks failed. Not marked as done for today.")
+
+            # Run visual search if needed, even if the Daily Set failed
+            if not self._stop_event.is_set():
+                self._run_visual_search_if_needed()
 
         finally:
             try:
@@ -2473,6 +2477,59 @@ class AutoRewarderAPI:
         )
         return queries + extra
 
+    def _run_visual_search_if_needed(self):
+        """
+        Controls the visual search process.
+
+        Checks if the task is needed today, generates a unique image,
+        performs the search, and updates the status after successful completion.
+
+        Returns:
+            bool: True if visual search was performed, False otherwise.
+        """
+        if self.daily_set is None or self.search_engine is None:
+            return False
+
+        if not self.daily_set.should_perform_visual_search():
+            self.log("Visual Search already completed today. Skipping.")
+            return False
+
+        self.log("Visual Search not completed today. Starting Visual Search task...")
+
+        used_images = self.daily_set.get_used_visual_search_images()
+
+        image_id, updated_images = self.search_engine.get_next_image_id(used_images)
+
+        image_path = self.search_engine.prepare_unique_image(image_id)
+
+        if image_path is None:
+            return False
+
+        try:
+            success = self.search_engine.perform_visual_search(
+                self._driver,
+                image_path,
+                stop_event=self._stop_event,
+            )
+
+            if success:
+                self.daily_set.save_used_visual_search_images(updated_images)
+                self.daily_set.mark_visual_search_as_completed()
+                self.log("Visual search completed and marked as done for today.")
+
+            return success
+
+        except Exception as e:
+            self.log(f"[WARNING] Visual search failed: {e}")
+            return False
+
+        finally:
+            if os.path.exists(image_path):
+                try:
+                    os.remove(image_path)
+                except Exception as e:
+                    self.log(f"[WARNING] Failed to remove temporary image file: {e}")
+
     def _run_phase(self, mobile, count, do_daily_set):
         """
         Open a driver for a single phase (PC or Mobile), do `count` searches,
@@ -2536,6 +2593,11 @@ class AutoRewarderAPI:
                         )
                     else:
                         self.log("Daily Set failed. Not marked as done for today.")
+
+            # Visual search runs only in PC phase,
+            # do_daily_set=False in Mobile phase.
+            if do_daily_set and not self._stop_event.is_set():
+                self._run_visual_search_if_needed()
 
             # When the Daily Set didn't run (mobile phase, or already done
             # today) the rewards counter on the current Bing SERP is still a
