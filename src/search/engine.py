@@ -290,11 +290,52 @@ class SearchEngine:
 
         return successful
 
-    def perform_visual_search(self, driver, image_path):
+    def perform_visual_search(self, driver, image_path, stop_event=None):
         """
-        ...
+        Perform a visual search on Bing using an image file.
+
+        Args:
+            driver (WebDriver): An instance of Selenium WebDriver to control the browser.
+            image_path (str): The path to the image file to use for the visual search.
+            stop_event (threading.Event, optional): If provided and set, the search will be cancelled.
+
+        Returns:
+            bool: True if the visual search was successful, False otherwise.
         """
-        raise NotImplementedError("Visual search is not implemented yet.")
+        from selenium.webdriver.support import expected_conditions as EC
+        from selenium.webdriver.support.ui import WebDriverWait
+
+        if stop_event is not None and stop_event.is_set():
+            self._log("Skipping visual search because Stop was requested.")
+            return False
+
+        human = HumanBehavior(driver, show_cursor=True, mobile=False)
+
+        try:
+            driver.get("https://www.bing.com")
+            wait = WebDriverWait(driver, 15)
+
+            visual_search_button = wait.until(
+                EC.element_to_be_clickable((By.ID, "sb_sbi"))
+            )
+
+            human.click_element(visual_search_button)
+
+            upload_input = wait.until(
+                EC.presence_of_element_located((By.ID, "sb_fileinput"))
+            )
+
+            # Send the file path to the hidden type="file" input element
+            upload_input.send_keys(image_path)
+
+            time.sleep(random.uniform(3, 5))
+
+            self._log("Visual search completed successfully.")
+            return True
+
+        except Exception as e:
+            self._log(f"[ERROR] Visual search failed: {e}")
+            return False
 
     def _get_next_image_id(self, used_images_list):
         """
