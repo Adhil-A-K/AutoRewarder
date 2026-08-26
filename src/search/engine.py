@@ -331,7 +331,15 @@ class SearchEngine:
             # Wait until the visual search results ("All") page is rendered
             wait.until(EC.visibility_of_element_located((By.ID, "b-scopeListItem-web")))
 
-            time.sleep(random.uniform(2, 5))
+            time.sleep(random.uniform(3, 6))
+
+            try:
+                human.scroll_page()
+            except WebDriverException as e:
+                short_error = str(e).split("\n")[0][:28]
+                self._log(
+                    f"[WARNING] WebDriver error when scrolling visual search results: {short_error}. Continuing."
+                )
 
             if stop_event is not None and stop_event.is_set():
                 self._log("Visual search stopped because Stop was requested.")
