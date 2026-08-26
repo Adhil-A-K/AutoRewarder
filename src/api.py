@@ -2515,7 +2515,7 @@ class AutoRewarderAPI:
             if success:
                 self.daily_set.save_used_visual_search_images(updated_images)
                 self.daily_set.mark_visual_search_as_completed()
-                self.log("Visual search completed and marked as done for today.")
+                self.log("Visual search marked as done for today.")
 
             return success
 

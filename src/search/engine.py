@@ -325,6 +325,8 @@ class SearchEngine:
                 EC.presence_of_element_located((By.ID, "sb_fileinput"))
             )
 
+            time.sleep(random.uniform(1, 2))
+
             # Send the file path to the hidden type="file" input element
             upload_input.send_keys(image_path)
 
@@ -391,6 +393,7 @@ class SearchEngine:
         """
         import os
         import tempfile
+
         from PIL import Image
 
         from ..config import VISUAL_SEARCH_ASSETS_DIR
@@ -400,14 +403,12 @@ class SearchEngine:
             f"{image_id}.jpg",
         )
 
-        temp_path = os.path.join(
-            tempfile.gettempdir(),
-            f"AutoRewarder_visual_search_{image_id}_{random.randint(1000, 9999)}.jpg",
-        )
-
         if not os.path.exists(original_path):
             self._log(f"[ERROR] Source image not found: {original_path}")
             return None
+
+        temp_path = None
+        file_descriptor = None
 
         try:
             with Image.open(original_path) as img:
@@ -425,10 +426,27 @@ class SearchEngine:
 
                 random_quality = random.randint(65, 95)
 
-                cropped_img.save(temp_path, "JPEG", quality=random_quality)
+                file_descriptor, temp_path = tempfile.mkstemp(
+                    prefix="AutoRewarder_visual_search_",
+                    suffix=".jpg",
+                )
+
+                with os.fdopen(file_descriptor, "wb") as temp_file:
+                    file_descriptor = None
+
+                    cropped_img.save(temp_file, format="JPEG", quality=random_quality)
 
             return temp_path
 
         except Exception as e:
+            if file_descriptor is not None:
+                os.close(file_descriptor)
+
+            if temp_path is not None:
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+
             self._log(f"[ERROR] Failed to process image {image_id}: {e}")
             return None
