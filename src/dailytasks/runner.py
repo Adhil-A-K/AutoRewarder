@@ -191,6 +191,34 @@ class DailySet:
 
         os.replace(temp_file, self.status_file)
 
+    def get_used_visual_search_images(self):
+        """
+        Returns the list of visual search image IDs that have already been used.
+        """
+        if not os.path.exists(self.status_file):
+            return []
+
+        try:
+            with open(self.status_file, "r", encoding="utf-8") as file:
+                data = json.load(file)
+
+            used_images = data.get("used_visual_search_images", [])
+
+            cleaned_images = []
+            for image_id in used_images:
+                if isinstance(image_id, int) and 1 <= image_id <= 30:
+                    cleaned_images.append(image_id)
+                else:
+                    self._log(
+                        f"[WARNING] Ignored invalid image ID from status file: {image_id}"
+                    )
+
+            return cleaned_images
+
+        except Exception:
+            self._log(f"[ERROR] Failed to read status file: {self.status_file}")
+            return []
+
     # -- Section processing ----------------------------------------------------
 
     def _process_section(
