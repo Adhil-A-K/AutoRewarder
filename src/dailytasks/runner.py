@@ -219,6 +219,30 @@ class DailySet:
             self._log(f"[ERROR] Failed to read status file: {self.status_file}")
             return []
 
+    def save_used_visual_search_images(self, used_images):
+        """
+        Save the list of used visual search image IDs to the status file.
+        """
+        data = {}
+
+        if os.path.exists(self.status_file):
+            try:
+                with open(self.status_file, "r", encoding="utf-8") as file:
+                    data = json.load(file)
+            except Exception:
+                self._log(f"[ERROR] Failed to read status file: {self.status_file}")
+
+        data["used_visual_search_images"] = used_images
+
+        os.makedirs(os.path.dirname(self.status_file), exist_ok=True)
+
+        temp_file = self.status_file + ".tmp"
+
+        with open(temp_file, "w", encoding="utf-8") as file:
+            json.dump(data, file)
+
+        os.replace(temp_file, self.status_file)
+
     # -- Section processing ----------------------------------------------------
 
     def _process_section(
