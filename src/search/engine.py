@@ -328,7 +328,14 @@ class SearchEngine:
             # Send the file path to the hidden type="file" input element
             upload_input.send_keys(image_path)
 
-            time.sleep(random.uniform(3, 5))
+            # Wait until the visual search results ("All") page is rendered
+            wait.until(EC.visibility_of_element_located((By.ID, "b-scopeListItem-web")))
+
+            time.sleep(random.uniform(2, 5))
+
+            if stop_event is not None and stop_event.is_set():
+                self._log("Visual search stopped because Stop was requested.")
+                return False
 
             self._log("Visual search completed successfully.")
             return True
