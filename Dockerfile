@@ -50,14 +50,20 @@ RUN sed -i "s/# ${LOCALE_GEN}/${LOCALE_GEN}/" /etc/locale.gen && \
     ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime && \
     dpkg-reconfigure -f noninteractive tzdata
 
-# Install Brave Browser (ARM64)
+# Install Brave Browser (ARM64) — PINNED to the release whose Chromium matches
+# the baked-in chromedriver (150.0.7871.x). Unpinned installs float to the
+# latest Brave (Chromium 152+), which chromedriver 150 refuses to drive
+# ("session not created: only supports Chrome version 150"). Bumping the pin
+# = bumping BOTH together.
+# Chromium mapping check: https://github.com/brave/brave-browser/releases
+ARG BRAVE_VERSION=1.92.144
 RUN curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg \
     https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] \
     https://brave-browser-apt-release.s3.brave.com/ stable main" \
     > /etc/apt/sources.list.d/brave-browser-release.list \
     && apt-get update \
-    && apt-get install -y brave-browser \
+    && apt-get install -y --allow-downgrades "brave-browser=${BRAVE_VERSION}" \
     && rm -rf /var/lib/apt/lists/*
 
 # Create venv and install Python deps (allow system site-packages for GTK/gi)
