@@ -339,6 +339,14 @@ For common issues and solutions, see the [Troubleshooting](USER_GUIDE.md#trouble
 - [x] The New Dashboard Support
 - [x] AI-generated search queries in your language (bring-your-own-key LLM)
 - [x] Simulated human typos in search queries (via nlpaug)
+- [ ] Visual search
+- [ ] View background logs directly in the UI
+- [ ] Custom OpenAI compatible endpoints
+- [ ] Human typos simulation for different keyboard/language layouts (AZERTY, QWERTZ, etc.)
+- [ ] Human-like typing with random spaces/backspaces
+- [ ] Per-account proxy support
+- [ ] Explore on Bing support
+- [ ] Run all accounts feature
 - [ ] Region-specific search query datasets (US, UK, CA, AU, IN, etc.)
 - [ ] Browser choice (Chrome, Firefox support in addition to Edge)
 - [ ] Keyboard shortcuts

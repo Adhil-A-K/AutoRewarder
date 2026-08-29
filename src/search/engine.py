@@ -289,3 +289,164 @@ class SearchEngine:
                 self._add_to_history(query, f"[ERROR] Unknown Error: {str(e)[:50]}")
 
         return successful
+
+    def perform_visual_search(self, driver, image_path, stop_event=None):
+        """
+        Perform a visual search on Bing using an image file.
+
+        Args:
+            driver (WebDriver): An instance of Selenium WebDriver to control the browser.
+            image_path (str): The path to the image file to use for the visual search.
+            stop_event (threading.Event, optional): If provided and set, the search will be cancelled.
+
+        Returns:
+            bool: True if the visual search was successful, False otherwise.
+        """
+        from selenium.webdriver.support import expected_conditions as EC
+        from selenium.webdriver.support.ui import WebDriverWait
+
+        if stop_event is not None and stop_event.is_set():
+            self._log("Skipping visual search because Stop was requested.")
+            return False
+
+        human = HumanBehavior(driver, show_cursor=True, mobile=False)
+
+        try:
+            driver.get("https://www.bing.com")
+            wait = WebDriverWait(driver, 15)
+
+            visual_search_button = wait.until(
+                EC.element_to_be_clickable((By.ID, "sb_sbi"))
+            )
+
+            human.click_element(visual_search_button)
+
+            upload_input = wait.until(
+                EC.presence_of_element_located((By.ID, "sb_fileinput"))
+            )
+
+            time.sleep(random.uniform(1, 2))
+
+            # Send the file path to the hidden type="file" input element
+            upload_input.send_keys(image_path)
+
+            # Wait until the visual search results ("All") page is rendered
+            wait.until(EC.visibility_of_element_located((By.ID, "b-scopeListItem-web")))
+
+            time.sleep(random.uniform(3, 6))
+
+            try:
+                human.scroll_page()
+            except WebDriverException as e:
+                short_error = str(e).split("\n")[0][:28]
+                self._log(
+                    f"[WARNING] WebDriver error when scrolling visual search results: {short_error}. Continuing."
+                )
+
+            if stop_event is not None and stop_event.is_set():
+                self._log("Visual search stopped because Stop was requested.")
+                return False
+
+            self._log("Visual search completed successfully.")
+            return True
+
+        except Exception as e:
+            self._log(f"[ERROR] Visual search failed: {e}")
+            return False
+
+    def get_next_image_id(self, used_images_list):
+        """
+        Selects the next available image ID that hasn't been used recently.
+        If all images have been used, resets the cycle.
+
+        Args:
+            used_images_list (list): A list of image IDs that have been used recently.
+
+        Returns:
+            tuple: A tuple with the selected image ID and the updated list of used images.
+        """
+        all_images = set(range(1, 31))
+        used_images = set(used_images_list)
+
+        available_images = list(all_images - used_images)
+
+        if not available_images:
+            self._log("[INFO] All images have been used. Resetting the cycle.")
+            available_images = list(all_images)
+            used_images_list = []
+
+        selected_image = random.choice(available_images)
+        used_images_list.append(selected_image)
+
+        return selected_image, used_images_list
+
+    def prepare_unique_image(self, image_id):
+        """
+        Prepares a unique version of the image to bypass hash-based detection.
+        Crops 1-5 pixels and randomizes JPEG compression quality.
+
+        Args:
+            image_id (int): The ID of the image to prepare.
+
+        Returns:
+            str: The path to the prepared image, or None if preparation failed.
+        """
+        import os
+        import tempfile
+
+        from PIL import Image
+
+        from ..config import VISUAL_SEARCH_ASSETS_DIR
+
+        original_path = os.path.join(
+            VISUAL_SEARCH_ASSETS_DIR,
+            f"{image_id}.jpg",
+        )
+
+        if not os.path.exists(original_path):
+            self._log(f"[ERROR] Source image not found: {original_path}")
+            return None
+
+        temp_path = None
+        file_descriptor = None
+
+        try:
+            with Image.open(original_path) as img:
+                width, height = img.size
+
+                # 54 684 unique variations
+                crop_left = random.randint(0, 5)
+                crop_top = random.randint(0, 5)
+                crop_right = random.randint(1, 7)
+                crop_bottom = random.randint(1, 7)
+
+                cropped_img = img.crop(
+                    (crop_left, crop_top, width - crop_right, height - crop_bottom)
+                )
+
+                random_quality = random.randint(65, 95)
+
+                file_descriptor, temp_path = tempfile.mkstemp(
+                    prefix="AutoRewarder_visual_search_",
+                    suffix=".jpg",
+                )
+
+                with os.fdopen(file_descriptor, "wb") as temp_file:
+                    file_descriptor = None
+
+                    cropped_img.save(temp_file, format="JPEG", quality=random_quality)
+
+            return temp_path
+
+        except Exception as e:
+            if file_descriptor is not None:
+                os.close(file_descriptor)
+
+            if temp_path is not None:
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+
+            self._log(f"[ERROR] Failed to process image {image_id}: {e}")
+            return None

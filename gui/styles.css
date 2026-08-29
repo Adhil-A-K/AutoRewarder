@@ -379,8 +379,19 @@ button {
 .run-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  flex-wrap: wrap;
   gap: 12px;
+}
+
+.run-top .toggle-row {
+  flex: 0 0 auto;
+  min-width: max-content;
+}
+
+.run-top .queries-panel {
+  flex: 1 1 240px;
+  min-width: 0;
 }
 
 .queries-panel {
