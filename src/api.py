@@ -35,6 +35,7 @@ from .accounts import (
     GlobalSettingsManager,
 )
 from .emulator import DriverManager, HumanBehavior, edge_policy
+from .safety import verify_exit_node
 from .search import HistoryManager, SearchEngine, llm, resolve_search_locale
 from .dailytasks import DailySet
 from .stats import (
@@ -388,6 +389,10 @@ class AutoRewarderAPI:
 
         self.is_driver_loading = True
         try:
+            # Safety gate — even warmup opens Bing (balance scrape).
+            if not self._ensure_exit_node_safe("startup warmup"):
+                return
+
             warmup_driver = self.driver_manager.setup_driver(headless=True)
             try:
                 # Reuse the warmup driver — already open and bound to this
@@ -1609,6 +1614,12 @@ class AutoRewarderAPI:
 
         current = self.account_manager.get_current()
         label = current["label"] if current else "account"
+
+        # Safety gate — login is the most IP-sensitive moment of all: this is
+        # where the account gets associated with whatever IP signs it in.
+        if not self._ensure_exit_node_safe("First Setup login"):
+            return False
+
         self.log(
             f"Starting First Setup for '{label}'... Please log in to your Microsoft account."
         )
@@ -1961,6 +1972,13 @@ class AutoRewarderAPI:
         if not self._balance_lock.acquire(blocking=False):
             return {"ok": False, "error": "busy"}
 
+        # Safety gate — the balance scrape drives Bing with the logged-in
+        # profile. Refuse rather than expose the datacenter IP. (Release the
+        # lock we just acquired — the try/finally that owns it starts later.)
+        if not self._ensure_exit_node_safe("balance refresh"):
+            self._balance_lock.release()
+            return {"ok": False, "error": "unsafe_network"}
+
         # Pin to the account that opened the driver so a concurrent account
         # switch can't redirect this profile's balance to another account.
         stats = self.stats
@@ -2051,6 +2069,44 @@ class AutoRewarderAPI:
         except Exception:
             time.sleep(seconds)
             return self._stop_event.is_set()
+
+    def _ensure_exit_node_safe(self, context="run"):
+        """
+        Safety gate for EVERY driver-launching path (GUI and headless alike).
+
+        Verifies the Tailscale exit node is active and the external IP is not
+        the VPS's datacenter IP. On failure, logs a CRITICAL message and
+        refuses: automation must never touch Bing from a datacenter IP.
+
+        Args:
+            context (str): short label for logs, e.g. "run start", "PC phase".
+
+        Returns:
+            bool: True if safe to proceed, False to abort the calling path.
+        """
+        try:
+            is_safe, ext_ip, msg = verify_exit_node()
+        except Exception as e:
+            is_safe, ext_ip, msg = False, "unknown", f"safety check crashed: {e}"
+
+        if is_safe:
+            self.log(f"[Safety] {context}: {msg}")
+            return True
+
+        self.log("[CRITICAL] " + msg)
+        self.log(
+            f"[CRITICAL] {context} ABORTED — exit node is not active. "
+            "Automation will NOT run on the VPS datacenter IP. "
+            "Enable the phone's exit node and try again."
+        )
+        if self._webview_window:
+            try:
+                self._webview_window.evaluate_js(
+                    "update_status_indicator && update_status_indicator('warning')"
+                )
+            except Exception:
+                pass
+        return False
 
     def _run_advanced_schedule(
         self, pc_count, mobile_count, duration_hours, queries_per_hour
@@ -2247,6 +2303,11 @@ class AutoRewarderAPI:
                 self.log("Starting AutoRewarder (Daily tasks only)...")
             else:
                 self.log("Starting AutoRewarder (Edge Edition)...")
+
+            # Safety gate — never launch automation without the exit node.
+            if not self._ensure_exit_node_safe("run start"):
+                return
+
             if self._webview_window:
                 try:
                     self._webview_window.evaluate_js(
@@ -2267,7 +2328,13 @@ class AutoRewarderAPI:
                     if pc_count > 0 and not self._stop_event.is_set():
                         self._run_phase(mobile=False, count=pc_count, do_daily_set=True)
 
-                    if mobile_count > 0 and not self._stop_event.is_set():
+                    # Re-verify between phases — the exit node can drop
+                    # (or fall back to the datacenter route) mid-run.
+                    if (
+                        mobile_count > 0
+                        and not self._stop_event.is_set()
+                        and self._ensure_exit_node_safe("pre-Mobile phase")
+                    ):
                         self._run_phase(
                             mobile=True, count=mobile_count, do_daily_set=False
                         )
@@ -2383,6 +2450,10 @@ class AutoRewarderAPI:
             )
 
         self.log("=== Daily tasks and Visual Search only ===")
+
+        # Safety gate — daily-only still touches Bing via a driver.
+        if not self._ensure_exit_node_safe("daily-only run"):
+            return
 
         self._driver = self.driver_manager.setup_driver(mobile=False)
         try:
@@ -2562,6 +2633,12 @@ class AutoRewarderAPI:
         self.log(
             f"=== {label} phase — {count} {'queries' if count != 1 else 'query'} ==="
         )
+
+        # Safety gate — runs before every browser launch, including advanced
+        # schedule batches. Mobile phase re-checks are done by the caller too;
+        # this catches advanced-schedule batches that launch without one.
+        if not self._ensure_exit_node_safe(f"{label} phase start"):
+            return
 
         queries_to_search = self._build_queries(count)
         if not queries_to_search:

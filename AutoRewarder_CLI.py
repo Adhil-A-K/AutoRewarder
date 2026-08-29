@@ -71,173 +71,11 @@ def console_log(message):
 
 
 # ---------------------------------------------------------------------------
-# Exit Node & IP Rotation Safety
+# Exit Node & IP Rotation Safety — shared implementation lives in src/safety.py
+# (same functions the GUI path gates on, so both surfaces stay in sync)
 # ---------------------------------------------------------------------------
 
-
-def verify_exit_node():
-    """
-    Verify that the Tailscale exit node is active and traffic routes through
-    the phone, NOT the VPS's datacenter IP.
-
-    Returns:
-        tuple: (is_safe: bool, external_ip: str, message: str)
-    """
-    import requests
-
-    # Get the VPS's real public IP (from cloud metadata)
-    vps_ip = ""
-    try:
-        resp = requests.get(
-            "http://169.254.169.254/opc/v2/vnics/", timeout=3
-        )
-        if resp.ok:
-            vnics = resp.json()
-            if vnics:
-                vps_ip = vnics[0].get("publicIp", "")
-    except Exception:
-        pass
-
-    # Get external IP through the exit node
-    try:
-        resp = requests.get("https://api.ipify.org", timeout=15)
-        external_ip = resp.text.strip()
-    except Exception as e:
-        return (False, "unknown", f"Cannot determine external IP: {e}")
-
-    if not external_ip:
-        return (False, "unknown", "Empty response from ipify.org")
-
-    if vps_ip and external_ip == vps_ip:
-        return (
-            False,
-            external_ip,
-            f"CRITICAL: External IP ({external_ip}) matches VPS IP! "
-            f"Exit node is NOT working!",
-        )
-
-    return (True, external_ip, f"Exit node active. External IP: {external_ip}")
-
-
-def rotate_ip():
-    """
-    Trigger IP rotation on the phone via the Automate app's HTTP API.
-
-    The phone toggles airplane mode ON then OFF, which forces the carrier
-    to assign a new dynamic IP.
-
-    Returns:
-        tuple: (success: bool, new_ip: str, message: str)
-    """
-    import requests
-
-    phone_ip = os.environ.get("PHONE_API_IP", "")
-    phone_port = os.environ.get("PHONE_API_PORT", "9090")
-
-    if not phone_ip:
-        return (
-            False,
-            "unknown",
-            "PHONE_API_IP not set. Cannot rotate IP.",
-        )
-
-    phone_url = f"http://{phone_ip}:{phone_port}"
-
-    # Get current IP
-    try:
-        resp = requests.get("https://api.ipify.org", timeout=15)
-        current_ip = resp.text.strip()
-    except Exception:
-        current_ip = "unknown"
-
-    console_log(f"[IP Rotation] Current IP: {current_ip}")
-    console_log(f"[IP Rotation] Triggering rotation via {phone_url}/newip...")
-
-    # Trigger rotation — retry a few times in case the phone is on slow data
-    triggered = False
-    for attempt in range(3):
-        try:
-            resp = requests.get(f"{phone_url}/newip", timeout=15)
-            if resp.ok:
-                triggered = True
-                console_log(f"[IP Rotation] Phone acknowledged: {resp.text[:100]}")
-                break
-        except Exception:
-            pass
-        console_log(f"[IP Rotation] Phone not responding, retry {attempt+1}/3...")
-        time.sleep(5)
-
-    if not triggered:
-        return (False, current_ip, "Cannot reach phone API after 3 attempts")
-
-    # Wait for phone to cycle through airplane mode.
-    # Realistic timeline:
-    #   0s   — airplane ON (radio disconnects)
-    #   3s   — airplane OFF (radio starts reconnecting)
-    #   8-15s — cellular data establishes
-    #   15-30s — Tailscale reconnects
-    #   20-40s — HTTP server reachable again
-    # Total: 30-60s typical, up to 90s on slow carriers
-    console_log("[IP Rotation] Waiting for phone to reconnect (be patient)...")
-    console_log("[IP Rotation]   Phone needs: airplane cycle + data + Tailscale reconnect")
-    max_wait = 180
-    start = time.time()
-
-    # Initial grace period — don't poll during airplane mode
-    console_log("[IP Rotation]   Initial grace period (20s)...")
-    time.sleep(20)
-
-    while True:
-        elapsed = time.time() - start
-        if elapsed >= max_wait:
-            return (
-                False,
-                current_ip,
-                f"Timeout after {max_wait}s waiting for phone",
-            )
-
-        try:
-            resp = requests.get(f"{phone_url}/status", timeout=10)
-            data = resp.json()
-            if data.get("ready"):
-                console_log(
-                    f"[IP Rotation] Phone back online ({elapsed:.0f}s)"
-                )
-                break
-        except Exception:
-            pass
-
-        time.sleep(8)  # Longer intervals — don't hammer slow mobile data
-
-    # Wait for network stabilization
-    console_log("[IP Rotation] Waiting for network to stabilize...")
-    time.sleep(8)
-
-    # Verify new IP — with retries
-    new_ip = ""
-    for attempt in range(5):
-        try:
-            resp = requests.get("https://api.ipify.org", timeout=20)
-            new_ip = resp.text.strip()
-            if new_ip:
-                break
-        except Exception:
-            pass
-        console_log(f"[IP Rotation] Retry {attempt+1}/5 getting new IP...")
-        time.sleep(5)
-
-    if not new_ip:
-        return (False, "unknown", "Cannot get new IP after 5 attempts")
-
-    if new_ip == current_ip and current_ip != "unknown":
-        console_log(
-            f"[IP Rotation] WARNING: IP unchanged ({new_ip}). "
-            f"Carrier may have recycled the same IP."
-        )
-    else:
-        console_log(f"[IP Rotation] IP changed: {current_ip} → {new_ip}")
-
-    return (True, new_ip, f"New IP: {new_ip}")
+from src.safety import rotate_ip, verify_exit_node
 
 
 # ---------------------------------------------------------------------------
@@ -575,7 +413,7 @@ def main():
         # --- IP Rotation between accounts ---
         if accounts_run > 0 and not args.no_rotate:
             console_log(f"--- Rotating IP before next account ({acc['label']}) ---")
-            success, new_ip, rot_msg = rotate_ip()
+            success, new_ip, rot_msg = rotate_ip(logger=console_log)
             if not success:
                 console_log(f"[WARNING] IP rotation failed: {rot_msg}")
                 console_log(f"Skipping account '{acc['label']}' for safety.")

@@ -73,6 +73,11 @@ services:
       - LANGUAGE=${LANGUAGE:-en_IN:en}
       - BROWSER_LANG=${BROWSER_LANG:-en-IN}
       - BROWSER_ACCEPT_LANG=${BROWSER_ACCEPT_LANG:-en-IN,en;q=0.9}
+      # Deterministic datacenter-IP guard: the container cannot reach Oracle's
+      # metadata service, so the VPS's own public IP is passed in explicitly.
+      # verify_exit_node() aborts any run if the external IP ever equals this.
+      # Set YOUR VPS's public IP in .env (see .env.example) — never commit it.
+      - VPS_PUBLIC_IP=${VPS_PUBLIC_IP:-}
     # Wait for Tailscale exit node before starting
     entrypoint: ["/bin/bash", "-c"]
     command:
