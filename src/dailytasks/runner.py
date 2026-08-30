@@ -139,7 +139,7 @@ class DailySet:
         os.makedirs(os.path.dirname(self.status_file), exist_ok=True)
         temp_file = self.status_file + ".tmp"
         with open(temp_file, "w", encoding="utf-8") as file:
-            json.dump(data, file)
+            json.dump(data, file, indent=4)
         os.replace(temp_file, self.status_file)
 
     # -- Status persistence (visual search) --------------------------------------------------
@@ -187,7 +187,7 @@ class DailySet:
         temp_file = self.status_file + ".tmp"
 
         with open(temp_file, "w", encoding="utf-8") as file:
-            json.dump(data, file)
+            json.dump(data, file, indent=4)
 
         os.replace(temp_file, self.status_file)
 
@@ -239,7 +239,7 @@ class DailySet:
         temp_file = self.status_file + ".tmp"
 
         with open(temp_file, "w", encoding="utf-8") as file:
-            json.dump(data, file)
+            json.dump(data, file, indent=4)
 
         os.replace(temp_file, self.status_file)
 

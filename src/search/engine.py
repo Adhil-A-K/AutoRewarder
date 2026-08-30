@@ -305,6 +305,16 @@ class SearchEngine:
         from selenium.webdriver.support import expected_conditions as EC
         from selenium.webdriver.support.ui import WebDriverWait
 
+        from ..config import APP_DIR
+
+        # In --onefile environments, aggressive WebDriverWait polling overloads
+        # msedgedriver, causing a GetHandleVerifier crash. This flag switches
+        # the script to a time.sleep + static find_element approach which works.
+        if "config" in APP_DIR:
+            portable_mode = True
+        else:
+            portable_mode = False
+
         if stop_event is not None and stop_event.is_set():
             self._log("Skipping visual search because Stop was requested.")
             return False
@@ -315,17 +325,32 @@ class SearchEngine:
             driver.get("https://www.bing.com")
             wait = WebDriverWait(driver, 15)
 
-            visual_search_button = wait.until(
-                EC.element_to_be_clickable((By.ID, "sb_sbi"))
-            )
+            time.sleep(random.uniform(1, 4))
+
+            if not portable_mode:
+                visual_search_button = wait.until(
+                    EC.element_to_be_clickable((By.ID, "sb_sbi"))
+                )
+            else:
+                visual_search_button = driver.find_element(By.ID, "sb_sbi")
+                time.sleep(random.uniform(1, 3))
+
+            self._log("Button was found - success")
 
             human.click_element(visual_search_button)
 
-            upload_input = wait.until(
-                EC.presence_of_element_located((By.ID, "sb_fileinput"))
-            )
+            self._log("Button was clicked - success")
 
-            time.sleep(random.uniform(1, 2))
+            if not portable_mode:
+                upload_input = wait.until(
+                    EC.presence_of_element_located((By.ID, "sb_fileinput"))
+                )
+            else:
+                upload_input = driver.find_element(By.ID, "sb_fileinput")
+
+            self._log("Upload input was found - success")
+
+            time.sleep(random.uniform(1, 4))
 
             # Send the file path to the hidden type="file" input element
             upload_input.send_keys(image_path)
@@ -333,7 +358,7 @@ class SearchEngine:
             # Wait until the visual search results ("All") page is rendered
             wait.until(EC.visibility_of_element_located((By.ID, "b-scopeListItem-web")))
 
-            time.sleep(random.uniform(3, 6))
+            time.sleep(random.uniform(4, 8))
 
             try:
                 human.scroll_page()
