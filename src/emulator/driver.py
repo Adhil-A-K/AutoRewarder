@@ -141,8 +141,11 @@ class DriverManager:
 
         if headless:
             options.add_argument("--headless=new")
-            options.add_argument("--disable-gpu")
-            options.add_argument("--disable-software-rasterizer")
+            # GPU stays ENABLED (SwiftShader in the container) so Microsoft's
+            # "browse 30 min" task tracks — upstream fix 9d8fb93. Do NOT add
+            # --disable-gpu or --disable-software-rasterizer here: in the
+            # container the "GPU" IS the software rasterizer, and disabling
+            # either kills rendering and re-breaks task tracking.
             options.add_argument("--disable-dev-shm-usage")
             options.add_argument("--window-position=-32000,-32000")
 
