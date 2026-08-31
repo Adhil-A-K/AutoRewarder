@@ -185,9 +185,13 @@ def _run_scheduled(api, pc, mobile, duration_hours, queries_per_hour):
 # ---------------------------------------------------------------------------
 
 
-def _create_headless_api():
+def _create_headless_api(hide_browser=True):
     """
     Build an AutoRewarderAPI bound to the console logger and force hide_browser.
+
+    Args:
+        hide_browser (bool): True = headless runs (scheduled/CLI automation).
+            False = visible browser on the X display (manual sessions).
 
     Returns:
         AutoRewarderAPI: a ready-to-run API instance with no GUI
@@ -197,12 +201,12 @@ def _create_headless_api():
     api.log = console_log
     api._safe_log = console_log
 
-    # Force headless at runtime only — do NOT call api.set_hide_browser(True),
+    # Force hide at runtime only — do NOT call api.set_hide_browser(...),
     # which persists to settings.json and would silently flip the user's GUI
     # preference every time a scheduled run fires.
-    api.hide_browser = True
+    api.hide_browser = bool(hide_browser)
     if api.driver_manager is not None:
-        api.driver_manager.hide_browser = True
+        api.driver_manager.hide_browser = bool(hide_browser)
 
     # Rebind the logger on per-account managers that captured it early.
     if api.history is not None:
@@ -335,6 +339,99 @@ def _run_account(api, acc, pc_override=None, mobile_override=None, force=False):
     return True
 
 
+def _run_manual_session(api, acc):
+    """
+    Open the account's logged-in browser for MANUAL use — no automation.
+
+    Purpose: let the human drive when Microsoft is throwing captchas or
+    verification pages. Solve them by hand (100% human interaction), do
+    searches/points manually, and warm the account's risk score back up.
+
+    Behavior:
+    - Same launch path as automation (setup_driver → same profile, same
+      spoofing, same exit-node gate), but hide_browser forced OFF so the
+      window is visible on the X display / VNC.
+    - Navigates to Bing and leaves it there. Nothing is clicked, typed,
+      or scraped by the bot.
+    - Ends when YOU close the browser window (same as the login flow),
+      then the process tree is hard-killed and orphans swept.
+
+    Returns:
+        bool: True if a session was opened, False if skipped.
+    """
+    aid = acc["id"]
+    label = acc["label"]
+
+    if not acc["first_setup_done"]:
+        console_log(f"Skipping '{label}': First Setup not completed.")
+        return False
+
+    if api.account_manager.current_id() != aid:
+        console_log(f"Switching to account '{label}'.")
+        api.account_manager.select(aid)
+        api._rebuild_account_context()
+        # Keep logger rebound after context rebuild.
+        if api.history is not None:
+            api.history._logger = console_log
+        if api.daily_set is not None:
+            api.daily_set.logger = console_log
+        if api.search_engine is not None:
+            api.search_engine._logger = console_log
+        if api.stats is not None:
+            api.stats._logger = console_log
+
+    # Safety gate — manual traffic still goes out through this connection.
+    if not api._ensure_exit_node_safe("manual session"):
+        return False
+
+    console_log(
+        f"Opening MANUAL session for '{label}' — visible browser, no automation."
+    )
+    console_log(
+        "Do your searches / captchas by hand. Close the browser window when done."
+    )
+
+    # Force visible for the manual driver only (runtime, not persisted).
+    api.driver_manager.hide_browser = False
+    try:
+        driver = api.driver_manager.setup_driver(mobile=False)
+    except Exception as e:
+        console_log(f"[ERROR] Could not open the browser: {e}")
+        return False
+
+    try:
+        try:
+            driver.get("https://www.bing.com")
+        except Exception:
+            console_log("[WARNING] Could not navigate to Bing — browser stays open.")
+
+        console_log("Manual session active. Waiting for you to close the browser…")
+        # Same end-condition as the login flow: poll until all windows close.
+        while True:
+            try:
+                if len(driver.window_handles) == 0:
+                    break
+            except Exception:
+                # Driver died (window closed / connection dropped) — done.
+                break
+            time.sleep(1)
+    finally:
+        console_log("Browser closed. Cleaning up…")
+        try:
+            driver.quit()
+        except Exception:
+            pass
+        # quit() only disconnects CDP (debuggerAddress attach) — hard-kill
+        # the process tree so the browser actually dies, then sweep orphans.
+        try:
+            api.driver_manager.terminate_browser()
+        except Exception:
+            pass
+
+    console_log("Manual session ended.")
+    return True
+
+
 def main():
     """Parse CLI args and run scheduled or targeted accounts."""
     parser = argparse.ArgumentParser(
@@ -363,12 +460,24 @@ def main():
         action="store_true",
         help="Skip exit node pre-flight check (dangerous).",
     )
+    parser.add_argument(
+        "--manual",
+        action="store_true",
+        help=(
+            "Open a MANUAL session: visible browser on the account's "
+            "logged-in profile, zero automation. Solve captchas / do "
+            "searches by hand; session ends when you close the browser. "
+            "Requires --account."
+        ),
+    )
     args = parser.parse_args()
 
     if args.pc is not None and args.pc < 0:
         parser.error("--pc must be >= 0")
     if args.mobile is not None and args.mobile < 0:
         parser.error("--mobile must be >= 0")
+    if args.manual and not args.account:
+        parser.error("--manual requires --account")
 
     # --- Pre-flight safety check ---
     if not args.no_preflight:
@@ -388,6 +497,16 @@ def main():
     accounts = api.account_manager.list()
     if not accounts:
         console_log("No accounts configured. Nothing to do.")
+        return
+
+    if args.manual:
+        # Manual session: visible browser on the account profile, zero
+        # automation. Pre-flight already ran; the session gate re-verifies.
+        acc = _resolve_account(api, args.account)
+        if acc is None:
+            console_log(f"[ERROR] No account matches '{args.account}'.")
+            return
+        _run_manual_session(api, acc)
         return
 
     if args.account:
