@@ -303,6 +303,55 @@ class DriverManager:
             },
         )
 
+        # 6. WebGL vendor/renderer spoof — SwiftShader is a server tell.
+        # Chromium on a GPU-less box reports UNMASKED_RENDERER_WEBGL as
+        # "ANGLE (Unknown, SwiftShader ...)" — a dead giveaway that the
+        # "PC" is really a VPS container. Spoof strings that are coherent
+        # with the session's UA identity:
+        #   desktop (Brave/Linux UA) → Mesa Intel UHD 620 (the most common
+        #       laptop iGPU — exactly what a normal user's PC reports)
+        #   mobile (iPhone Safari UA) → Apple GPU (what real iOS reports)
+        # Patching the prototypes at document-start means every page (and
+        # every iframe) sees the spoofed strings for both WebGL and WebGL2,
+        # whether queried directly or via WEBGL_debug_renderer_info.
+        if mobile:
+            webgl_vendor = "Apple Inc."
+            webgl_renderer = "Apple GPU"
+        else:
+            webgl_vendor = "Google Inc. (Intel)"
+            webgl_renderer = (
+                "ANGLE (Intel, Mesa Intel(R) UHD Graphics 620 (CML GT2), "
+                "OpenGL 4.6 (Compatibility Profile) Mesa 24.2.8-0ubuntu1)"
+            )
+        webgl_spoof_script = f"""
+                    // WebGL vendor/renderer spoof (see comment above)
+                    (function() {{
+                        const SPOOF_VENDOR = {webgl_vendor!r};
+                        const SPOOF_RENDERER = {webgl_renderer!r};
+                        const patchProto = function(proto) {{
+                            if (!proto || !proto.getParameter) return;
+                            const origGetParameter = proto.getParameter;
+                            proto.getParameter = function(parameter) {{
+                                // 37445 = UNMASKED_VENDOR_WEBGL,
+                                // 37446 = UNMASKED_RENDERER_WEBGL
+                                // (WEBGL_debug_renderer_info constants)
+                                if (parameter === 37445) return SPOOF_VENDOR;
+                                if (parameter === 37446) return SPOOF_RENDERER;
+                                return origGetParameter.call(this, parameter);
+                            }};
+                        }};
+                        try {{ patchProto(WebGLRenderingContext.prototype); }} catch (e) {{}}
+                        try {{ patchProto(WebGL2RenderingContext.prototype); }} catch (e) {{}}
+                    }})();
+                """
+        try:
+            _driver.execute_cdp_cmd(
+                "Page.addScriptToEvaluateOnNewDocument",
+                {"source": webgl_spoof_script},
+            )
+        except Exception:
+            pass  # Spoof is best-effort; never block the launch on it.
+
         if mobile:
             # Turn the session into a genuine mobile one at the engine level.
             # Beyond the UA string, this makes `navigator.maxTouchPoints > 0`,
